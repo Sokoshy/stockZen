@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StockZen - Direction 2: Professional Command</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Space Grotesk', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        pro: {
+                            bg: '#0F1115',
+                            card: '#181B21',
+                            elevated: '#1E2229',
+                            border: '#2A2F3A',
+                            text: '#F0F1F5',
+                            muted: '#6B7280',
+                            accent: '#3B82F6',
+                            red: '#EF4444',
+                            orange: '#F97316',
+                            green: '#22C55E',
+                            purple: '#8B5CF6',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        * {
+            font-family: 'Space Grotesk', sans-serif;
+        }
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .glass-panel {
+            background: rgba(24, 27, 33, 0.8);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(42, 47, 58, 0.8);
+        }
+        .status-dot {
+            animation: pulse-glow 2s ease-in-out infinite;
+        }
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 0 0 currentColor; }
+            50% { box-shadow: 0 0 10px 2px currentColor; }
+        }
+        .grid-bg {
+            background-image: 
+                linear-gradient(rgba(59, 130, 246, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(59, 130, 246, 0.03) 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+        .data-row:hover {
+            background: rgba(59, 130, 246, 0.05);
+        }
+        .metric-card {
+            transition: all 0.3s ease;
+        }
+        .metric-card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(59, 130, 246, 0.5);
+        }
+    </style>
+</head>
+<body class="bg-pro-bg text-pro-text min-h-screen grid-bg">
+    <!-- Desktop Layout -->
+    <div class="flex h-screen overflow-hidden">
+        
+        <!-- Sidebar Navigation -->
+        <aside class="w-64 bg-pro-card border-r border-pro-border flex-shrink-0 flex flex-col">
+            <div class="p-6 border-b border-pro-border">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-pro-accent to-pro-purple flex items-center justify-center">
+                        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <h1 class="font-bold text-lg">StockZen</h1>
+                        <p class="text-xs text-pro-muted">Command Center</p>
+                    </div>
+                </div>
+            </div>
+
+            <nav class="flex-1 p-4 space-y-1">
+                <a href="#" class="flex items-center gap-3 px-4 py-3 bg-pro-accent/10 border border-pro-accent/30 rounded-lg text-pro-accent">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/>
+                    </svg>
+                    <span class="font-medium">Dashboard</span>
+                </a>
+                <a href="#" class="flex items-center gap-3 px-4 py-3 rounded-lg text-pro-muted hover:text-pro-text hover:bg-pro-elevated transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                    </svg>
+                    <span class="font-medium">Inventaire</span>
+                    <span class="ml-auto text-xs bg-pro-elevated px-2 py-0.5 rounded mono">142</span>
+                </a>
+                <a href="#" class="flex items-center gap-3 px-4 py-3 rounded-lg text-pro-muted hover:text-pro-text hover:bg-pro-elevated transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <span class="font-medium">Mouvements</span>
+                </a>
+                <a href="#" class="flex items-center gap-3 px-4 py-3 rounded-lg text-pro-muted hover:text-pro-text hover:bg-pro-elevated transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
+                    </svg>
+                    <span class="font-medium">Fournisseurs</span>
+                    <span class="ml-auto text-xs bg-pro-elevated px-2 py-0.5 rounded mono">18</span>
+                </a>
+                <a href="#" class="flex items-center gap-3 px-4 py-3 rounded-lg text-pro-muted hover:text-pro-text hover:bg-pro-elevated transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                    </svg>
+                    <span class="font-medium">Rapports</span>
+                </a>
+            </nav>
+
+            <div class="p-4 border-t border-pro-border">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-full bg-gradient-to-br from-pro-orange to-pro-red flex items-center justify-center text-sm font-bold">
+                        ML
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p class="font-medium text-sm truncate">Marc Lefebvre</p>
+                        <p class="text-xs text-pro-muted truncate">Chez Marco</p>
+                    </div>
+                    <div class="w-2 h-2 rounded-full bg-pro-green status-dot"></div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 overflow-auto">
+            <!-- Header -->
+            <header class="sticky top-0 z-40 glass-panel border-b border-pro-border px-6 py-4">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-sm text-pro-muted">Mardi 4 février 2025</p>
+                        <h2 class="text-2xl font-bold">Tableau de bord</h2>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <button class="px-4 py-2 bg-pro-elevated border border-pro-border rounded-lg text-sm font-medium hover:border-pro-accent transition-colors">
+                            <span class="flex items-center gap-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                                </svg>
+                                Exporter
+                            </span>
+                        </button>
+                        <button class="px-4 py-2 bg-pro-accent text-white rounded-lg text-sm font-medium hover:bg-blue-600 transition-colors">
+                            <span class="flex items-center gap-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+                                </svg>
+                                Nouveau mouvement
+                            </span>
+                        </button>
+                    </div>
+                </div>
+            </header>
+
+            <div class="p-6 space-y-6">
+                <!-- KPI Cards -->
+                <div class="grid grid-cols-4 gap-4">
+                    <div class="metric-card bg-pro-card border border-pro-border rounded-xl p-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <p class="text-sm text-pro-muted">Alertes critiques</p>
+                            <div class="w-2 h-2 rounded-full bg-pro-red status-dot"></div>
+                        </div>
+                        <p class="text-3xl font-bold text-pro-red mono">3</p>
+                        <p class="text-xs text-pro-muted mt-1">Actions immédiates requises</p>
+                    </div>
+                    <div class="metric-card bg-pro-card border border-pro-border rounded-xl p-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <p class="text-sm text-pro-muted">Alertes attention</p>
+                            <div class="w-2 h-2 rounded-full bg-pro-orange"></div>
+                        </div>
+                        <p class="text-3xl font-bold text-pro-orange mono">7</p>
+                        <p class="text-xs text-pro-muted mt-1">Préparation nécessaire</p>
+                    </div>
+                    <div class="metric-card bg-pro-card border border-pro-border rounded-xl p-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <p class="text-sm text-pro-muted">Stock sain</p>
+                            <div class="w-2 h-2 rounded-full bg-pro-green"></div>
+                        </div>
+                        <p class="text-3xl font-bold text-pro-green mono">132</p>
+                        <p class="text-xs text-pro-muted mt-1">Aucune action requise</p>
+                    </div>
+                    <div class="metric-card bg-pro-card border border-pro-border rounded-xl p-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <p class="text-sm text-pro-muted">Index sérénité</p>
+                            <svg class="w-4 h-4 text-pro-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                            </svg>
+                        </div>
+                        <p class="text-3xl font-bold text-pro-accent mono">76<span class="text-lg text-pro-muted">/100</span></p>
+                        <p class="text-xs text-pro-muted mt-1">+4% vs hier</p>
+                    </div>
+                </div>
+
+                <!-- Critical Alerts Section -->
+                <div class="bg-pro-card border border-pro-border rounded-xl overflow-hidden">
+                    <div class="px-6 py-4 border-b border-pro-border bg-pro-red/5 flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <div class="w-8 h-8 rounded-lg bg-pro-red/20 flex items-center justify-center">
+                                <svg class="w-4 h-4 text-pro-red" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                                </svg>
+                            </div>
+                            <div>
+                                <h3 class="font-semibold">Alertes critiques</h3>
+                                <p class="text-xs text-pro-muted">Action requise avant 10h00</p>
+                            </div>
+                        </div>
+                        <button class="px-3 py-1.5 bg-pro-red text-white text-sm font-medium rounded-lg hover:bg-red-600 transition-colors">
+                            Tout commander
+                        </button>
+                    </div>
+                    <div class="divide-y divide-pro-border">
+                        <div class="data-row px-6 py-4 flex items-center gap-4">
+                            <div class="w-12 h-12 rounded-lg bg-pro-red/10 flex items-center justify-center text-2xl">
+                                🥩
+                            </div>
+                            <div class="flex-1">
+                                <div class="flex items-center gap-2 mb-1">
+                                    <p class="font-semibold">Filet de bœuf</p>
+                                    <span class="px-2 py-0.5 bg-pro-red/20 text-pro-red text-xs rounded font-medium">CRITIQUE</span>
+                                </div>
+                                <div class="flex items-center gap-4 text-sm text-pro-muted">
+                                    <span class="mono">1.2 kg restant</span>
+                                    <span>•</span>
+                                    <span>Fournisseur: Boucherie Martin</span>
+                                    <span>•</span>
+                                    <span class="text-pro-red">Stockout dans 4h</span>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button class="px-3 py-2 bg-pro-elevated border border-pro-border rounded-lg text-sm hover:border-pro-accent transition-colors">
+                                    Modifier
+                                </button>
+                                <button class="px-3 py-2 bg-pro-red text-white rounded-lg text-sm font-medium hover:bg-red-600 transition-colors">
+                                    Commander
+                                </button>
+                            </div>
+                        </div>
+                        <div class="data-row px-6 py-4 flex items-center gap-4">
+                            <div class="w-12 h-12 rounded-lg bg-pro-red/10 flex items-center justify-center text-2xl">
+                                🍷
+                            </div>
+                            <div class="flex-1">
+                                <div class="flex items-center gap-2 mb-1">
+                                    <p class="font-semibold">Vin blanc Sancerre</p>
+                                    <span class="px-2 py-0.5 bg-pro-red/20 text-pro-red text-xs rounded font-medium">CRITIQUE</span>
+                                </div>
+                                <div class="flex items-center gap-4 text-sm text-pro-muted">
+                                    <span class="mono">3 bouteilles</span>
+                                    <span>•</span>
+                                    <span>Fournisseur: Caviste Dubois</span>
+                                    <span>•</span>
+                                    <span class="text-pro-red">Service ce soir</span>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button class="px-3 py-2 bg-pro-elevated border border-pro-border rounded-lg text-sm hover:border-pro-accent transition-colors">
+                                    Modifier
+                                </button>
+                                <button class="px-3 py-2 bg-pro-red text-white rounded-lg text-sm font-medium hover:bg-red-600 transition-colors">
+                                    Commander
+                                </button>
+                            </div>
+                        </div>
+                        <div class="data-row px-6 py-4 flex items-center gap-4">
+                            <div class="w-12 h-12 rounded-lg bg-pro-red/10 flex items-center justify-center text-2xl">
+                                🧀
+                            </div>
+                            <div class="flex-1">
+                                <div class="flex items-center gap-2 mb-1">
+                                    <p class="font-semibold">Comté 18 mois</p>
+                                    <span class="px-2 py-0.5 bg-pro-red/20 text-pro-red text-xs rounded font-medium">CRITIQUE</span>
+                                </div>
+                                <div class="flex items-center gap-4 text-sm text-pro-muted">
+                                    <span class="mono">400g restant</span>
+                                    <span>•</span>
+                                    <span>Fromagerie Leblanc</span>
+                                    <span>•</span>
+                                    <span class="text-pro-red">Plat du jour</span>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button class="px-3 py-2 bg-pro-elevated border border-pro-border rounded-lg text-sm hover:border-pro-accent transition-colors">
+                                    Modifier
+                                </button>
+                                <button class="px-3 py-2 bg-pro-red text-white rounded-lg text-sm font-medium hover:bg-red-600 transition-colors">
+                                    Commander
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Two Column Layout -->
+                <div class="grid grid-cols-2 gap-6">
+                    <!-- Attention Alerts -->
+                    <div class="bg-pro-card border border-pro-border rounded-xl">
+                        <div class="px-6 py-4 border-b border-pro-border flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <div class="w-2 h-2 rounded-full bg-pro-orange"></div>
+                                <h3 class="font-semibold">Attention requise</h3>
+                            </div>
+                            <span class="text-sm text-pro-muted mono">7 items</span>
+                        </div>
+                        <div class="divide-y divide-pro-border max-h-80 overflow-auto">
+                            <div class="data-row px-6 py-3 flex items-center gap-3">
+                                <span class="text-xl">🐟</span>
+                                <div class="flex-1 min-w-0">
+                                    <p class="font-medium text-sm truncate">Saumon frais</p>
+                                    <p class="text-xs text-pro-muted mono">2.8 kg • 2j restant</p>
+                                </div>
+                                <span class="text-xs text-pro-orange font-medium">2j</span>
+                            </div>
+                            <div class="data-row px-6 py-3 flex items-center gap-3">
+                                <span class="text-xl">🥬</span>
+                                <div class="flex-1 min-w-0">
+                                    <p class="font-medium text-sm truncate">Salade verte</p>
+                                    <p class="text-xs text-pro-muted mono">5 kg • 3j restant</p>
+                                </div>
+                                <span class="text-xs text-pro-orange font-medium">3j</span>
+                            </div>
+                            <div class="data-row px-6 py-3 flex items-center gap-3">
+                                <span class="text-xl">🍄</span>
+                                <div class="flex-1 min-w-0">
+                                    <p class="font-medium text-sm truncate">Champignons</p>
+                                    <p class="text-xs text-pro-muted mono">1.5 kg • 3j restant</p>
+                                </div>
+                                <span class="text-xs text-pro-orange font-medium">3j</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Supplier Status -->
+                    <div class="bg-pro-card border border-pro-border rounded-xl">
+                        <div class="px-6 py-4 border-b border-pro-border flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <svg class="w-4 h-4 text-pro-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                                </svg>
+                                <h3 class="font-semibold">Livraisons aujourd'hui</h3>
+                            </div>
+                            <span class="text-sm text-pro-muted mono">4 fournisseurs</span>
+                        </div>
+                        <div class="p-6 space-y-3">
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 rounded-lg bg-pro-elevated flex items-center justify-center">
+                                    <span class="text-sm">🥩</span>
+                                </div>
+                                <div class="flex-1">
+                                    <p class="font-medium text-sm">Boucherie Martin</p>
+                                    <p class="text-xs text-pro-muted">6:30 AM • 12 articles</p>
+                                </div>
+                                <span class="px-2 py-1 bg-pro-green/20 text-pro-green text-xs rounded font-medium">Arrivé</span>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 rounded-lg bg-pro-elevated flex items-center justify-center">
+                                    <span class="text-sm">🐟</span>
+                                </div>
+                                <div class="flex-1">
+                                    <p class="font-medium text-sm">Poissonnerie Lemar</p>
+                                    <p class="text-xs text-pro-muted">7:00 AM • 8 articles</p>
+                                </div>
+                                <span class="px-2 py-1 bg-pro-orange/20 text-pro-orange text-xs rounded font-medium">En route</span>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <div class="w-10 h-10 rounded-lg bg-pro-elevated flex items-center justify-center">
+                                    <span class="text-sm">🥬</span>
+                                </div>
+                                <div class="flex-1">
+                                    <p class="font-medium text-sm">Maraîcher Bio</p>
+                                    <p class="text-xs text-pro-muted">8:30 AM • 15 articles</p>
+                                </div>
+                                <span class="px-2 py-1 bg-pro-accent/20 text-pro-accent text-xs rounded font-medium">Confirmé</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Actions Bar -->
+                <div class="glass-panel rounded-xl p-4 flex items-center gap-4">
+                    <span class="text-sm text-pro-muted font-medium">Actions rapides:</span>
+                    <div class="flex-1 flex items-center gap-2">
+                        <button class="px-4 py-2 bg-pro-elevated border border-pro-border rounded-lg text-sm hover:border-pro-accent transition-colors flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                            </svg>
+                            Entrée stock
+                        </button>
+                        <button class="px-4 py-2 bg-pro-elevated border border-pro-border rounded-lg text-sm hover:border-pro-accent transition-colors flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/>
+                            </svg>
+                            Sortie stock
+                        </button>
+                        <button class="px-4 py-2 bg-pro-elevated border border-pro-border rounded-lg text-sm hover:border-pro-accent transition-colors flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                            </svg>
+                            Inventaire
+                        </button>
+                        <button class="px-4 py-2 bg-pro-elevated border border-pro-border rounded-lg text-sm hover:border-pro-accent transition-colors flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                            </svg>
+                            Exporter CSV
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Design Notes -->
+    <div class="fixed top-4 right-4 bg-pro-card/90 backdrop-blur-sm border border-pro-border rounded-lg p-4 shadow-2xl max-w-xs z-50">
+        <h3 class="font-semibold text-pro-text mb-2">Direction 2: Professional Command</h3>
+        <p class="text-sm text-pro-muted mb-2">Pour Marc - Restaurateur avec 18 fournisseurs</p>
+        <ul class="text-xs text-pro-muted space-y-1">
+            <li>• Interface dense mais organisée</li>
+            <li>• Vue consolidée de tous les KPIs</li>
+            <li>• Navigation sidebar pour accès rapide</li>
+            <li>• Dark theme - professionnel, technique</li>
+            <li>• Toutes les informations visibles</li>
+        </ul>
+    </div>
+</body>
+</html>

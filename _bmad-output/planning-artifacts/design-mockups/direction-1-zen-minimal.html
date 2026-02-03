@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StockZen - Direction 1: Zen Minimal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['DM Sans', 'sans-serif'],
+                    },
+                    colors: {
+                        zen: {
+                            bg: '#FEFDF9',
+                            card: '#FFFFFF',
+                            muted: '#F5F5F0',
+                            text: '#1A1A1A',
+                            light: '#6B6B6B',
+                            border: '#E8E8E3',
+                            red: '#DC4444',
+                            orange: '#E88C3A',
+                            green: '#4CAF7C',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        * {
+            font-family: 'DM Sans', sans-serif;
+        }
+        .zen-shadow {
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+        }
+        .zen-shadow-hover {
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06), 0 2px 4px rgba(0, 0, 0, 0.03);
+        }
+        .alert-pulse {
+            animation: pulse-subtle 2s ease-in-out infinite;
+        }
+        @keyframes pulse-subtle {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.85; }
+        }
+        .slide-up {
+            animation: slideUp 0.4s ease-out;
+        }
+        @keyframes slideUp {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .zen-button {
+            transition: all 0.2s ease;
+        }
+        .zen-button:active {
+            transform: scale(0.97);
+        }
+        .number-tabular {
+            font-variant-numeric: tabular-nums;
+            letter-spacing: -0.02em;
+        }
+    </style>
+</head>
+<body class="bg-zen-bg min-h-screen">
+    <!-- Mobile Container -->
+    <div class="max-w-md mx-auto min-h-screen bg-zen-bg relative pb-24">
+        
+        <!-- Header -->
+        <header class="px-6 pt-12 pb-4">
+            <div class="flex items-center justify-between mb-2">
+                <div>
+                    <p class="text-xs text-zen-light font-medium tracking-wide uppercase">Bonjour Bernard</p>
+                    <h1 class="text-2xl font-bold text-zen-text">StockZen</h1>
+                </div>
+                <div class="w-10 h-10 rounded-full bg-zen-muted flex items-center justify-center">
+                    <span class="text-sm font-semibold text-zen-text">BM</span>
+                </div>
+            </div>
+            <p class="text-sm text-zen-light">Mardi 4 février, 5:42 AM</p>
+        </header>
+
+        <!-- Critical Alert (Only visible if exists) -->
+        <div class="px-6 mb-6 slide-up">
+            <div class="bg-zen-red/10 border border-zen-red/20 rounded-2xl p-4 zen-shadow alert-pulse">
+                <div class="flex items-start gap-3">
+                    <div class="w-8 h-8 rounded-full bg-zen-red/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <svg class="w-4 h-4 text-zen-red" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                        </svg>
+                    </div>
+                    <div class="flex-1">
+                        <p class="text-sm font-semibold text-zen-red mb-1">Levure fraîche critique</p>
+                        <p class="text-xs text-zen-light">Plus que 200g • Commande ce matin</p>
+                    </div>
+                    <button class="px-3 py-1.5 bg-zen-red text-white text-xs font-medium rounded-full zen-button">
+                        Commander
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Action - Ultra Simple -->
+        <div class="px-6 mb-8 slide-up" style="animation-delay: 0.1s">
+            <p class="text-xs text-zen-light font-medium tracking-wide uppercase mb-3">Action rapide</p>
+            <div class="grid grid-cols-2 gap-3">
+                <button class="zen-button bg-zen-text text-white rounded-2xl p-5 zen-shadow hover:zen-shadow-hover">
+                    <div class="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center mb-3">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/>
+                        </svg>
+                    </div>
+                    <p class="text-sm font-semibold">Sortie stock</p>
+                    <p class="text-xs text-white/70 mt-1">Utilisé pour production</p>
+                </button>
+                <button class="zen-button bg-zen-card border border-zen-border rounded-2xl p-5 zen-shadow hover:zen-shadow-hover">
+                    <div class="w-10 h-10 rounded-full bg-zen-green/20 flex items-center justify-center mb-3">
+                        <svg class="w-5 h-5 text-zen-green" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                        </svg>
+                    </div>
+                    <p class="text-sm font-semibold text-zen-text">Entrée stock</p>
+                    <p class="text-xs text-zen-light mt-1">Réception fournisseur</p>
+                </button>
+            </div>
+        </div>
+
+        <!-- Recent Products (Simplified) -->
+        <div class="px-6 mb-6 slide-up" style="animation-delay: 0.2s">
+            <div class="flex items-center justify-between mb-3">
+                <p class="text-xs text-zen-light font-medium tracking-wide uppercase">Produits récents</p>
+                <button class="text-xs text-zen-text font-medium">Voir tout</button>
+            </div>
+            
+            <div class="space-y-2">
+                <!-- Product 1 - Red Alert -->
+                <button class="w-full zen-button bg-zen-card rounded-xl p-4 zen-shadow flex items-center gap-3 text-left border-l-4 border-zen-red">
+                    <div class="w-10 h-10 rounded-lg bg-zen-red/10 flex items-center justify-center flex-shrink-0">
+                        <span class="text-lg">🧈</span>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm font-semibold text-zen-text truncate">Beurre doux</p>
+                        <p class="text-xs text-zen-light">2.5 kg restant</p>
+                    </div>
+                    <div class="text-right">
+                        <p class="text-xs font-semibold text-zen-red">Critique</p>
+                        <p class="text-xs text-zen-light">2j restant</p>
+                    </div>
+                </button>
+
+                <!-- Product 2 - Orange -->
+                <button class="w-full zen-button bg-zen-card rounded-xl p-4 zen-shadow flex items-center gap-3 text-left border-l-4 border-zen-orange">
+                    <div class="w-10 h-10 rounded-lg bg-zen-orange/10 flex items-center justify-center flex-shrink-0">
+                        <span class="text-lg">🌾</span>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm font-semibold text-zen-text truncate">Farine T55</p>
+                        <p class="text-xs text-zen-light">12 kg restant</p>
+                    </div>
+                    <div class="text-right">
+                        <p class="text-xs font-semibold text-zen-orange">Attention</p>
+                        <p class="text-xs text-zen-light">5j restant</p>
+                    </div>
+                </button>
+
+                <!-- Product 3 - Green -->
+                <button class="w-full zen-button bg-zen-card rounded-xl p-4 zen-shadow flex items-center gap-3 text-left border-l-4 border-zen-green">
+                    <div class="w-10 h-10 rounded-lg bg-zen-green/10 flex items-center justify-center flex-shrink-0">
+                        <span class="text-lg">🥚</span>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm font-semibold text-zen-text truncate">Œufs calibre M</p>
+                        <p class="text-xs text-zen-light">180 unités</p>
+                    </div>
+                    <div class="text-right">
+                        <p class="text-xs font-semibold text-zen-green">OK</p>
+                        <p class="text-xs text-zen-light">12j restant</p>
+                    </div>
+                </button>
+            </div>
+        </div>
+
+        <!-- Stats Summary (Minimal) -->
+        <div class="px-6 slide-up" style="animation-delay: 0.3s">
+            <div class="bg-zen-muted rounded-2xl p-4">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-xs text-zen-light mb-1">Index tranquillité</p>
+                        <p class="text-2xl font-bold text-zen-text number-tabular">82<span class="text-sm text-zen-light font-normal">/100</span></p>
+                    </div>
+                    <div class="w-12 h-12 rounded-full border-4 border-zen-green flex items-center justify-center">
+                        <span class="text-xs font-semibold text-zen-green">BON</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Navigation (Ultra minimal - 3 items only) -->
+        <nav class="fixed bottom-0 left-0 right-0 bg-zen-card border-t border-zen-border px-6 py-4 z-50">
+            <div class="max-w-md mx-auto flex items-center justify-around">
+                <button class="flex flex-col items-center gap-1 text-zen-text">
+                    <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                    </svg>
+                    <span class="text-xs font-medium">Accueil</span>
+                </button>
+                <button class="flex flex-col items-center gap-1 text-zen-light">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                    </svg>
+                    <span class="text-xs font-medium">Historique</span>
+                </button>
+                <button class="flex flex-col items-center gap-1 text-zen-light">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    </svg>
+                    <span class="text-xs font-medium">Réglages</span>
+                </button>
+            </div>
+        </nav>
+    </div>
+
+    <!-- Design Notes -->
+    <div class="fixed top-4 right-4 bg-white/90 backdrop-blur-sm rounded-lg p-4 shadow-lg max-w-xs z-50 border border-gray-200">
+        <h3 class="font-semibold text-gray-800 mb-2">Direction 1: Zen Minimal</h3>
+        <p class="text-sm text-gray-600 mb-2">Pour Bernard - Boulanger à 4h du matin</p>
+        <ul class="text-xs text-gray-500 space-y-1">
+            <li>• Ultra-simplifié, max 3 boutons visibles</li>
+            <li>• Seules les alertes critiques sont en évidence</li>
+            <li>• Navigation invisible, tout au dashboard</li>
+            <li>• Design apaisant, couleurs très douces</li>
+            <li>• 3-clicks maximum pour toute action</li>
+        </ul>
+    </div>
+</body>
+</html>

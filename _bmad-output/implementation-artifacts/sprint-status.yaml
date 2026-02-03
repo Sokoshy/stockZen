@@ -1,0 +1,86 @@
+# generated: 2026-02-03
+# project: gestionnaire-stock
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: {project-root}/_bmad-output/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog -> in-progress: Automatically when first story is created (via create-story)
+#   - in-progress -> done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review (via Dev's code-review workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - SM typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+
+generated: 2026-02-03
+project: gestionnaire-stock
+project_key: NOKEY
+tracking_system: file-system
+story_location: "{project-root}/_bmad-output/implementation-artifacts"
+
+development_status:
+  epic-1: backlog
+  1-1-set-up-initial-project-from-starter-template-create-t3-app: backlog
+  1-2-sign-up-create-tenant-admin-start-session: backlog
+  1-3-login-logout-short-session-remember-me: backlog
+  1-4-password-reset-via-email-link-one-time-token: backlog
+  1-5-team-membership-roles-management-admin-manager-operator: backlog
+  1-6-invite-user-to-tenant-revocable-expiring-link-set-password: backlog
+  1-7-rbac-enforcement-hide-purchaseprice-for-operators: backlog
+  1-8-tenant-isolation-enforcement-rls-anti-leak-tests: backlog
+  1-9-audit-logs-for-sensitive-account-actions-auth-team: backlog
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-create-product-offline-first: backlog
+  2-2-edit-delete-products-product-list-filters-offline-first: backlog
+  2-3-record-stock-entry-exit-offline-3-click-loop: backlog
+  2-4-movement-history-per-product-newest-first-infinite-scroll: backlog
+  2-5-auto-sync-engine-sync-status-offline-queue-lww-conflicts: backlog
+  epic-2-retrospective: optional
+
+  epic-3: backlog
+  3-1-configure-account-default-stock-thresholds-absolute-quantities: backlog
+  3-2-configure-per-product-thresholds-optional-override-of-defaults: backlog
+  3-3-automatic-alert-generation-r-o-g-classification-one-active-alert-per-product: backlog
+  3-4-alert-triage-handled-vs-snoozed-ignored: backlog
+  3-5-email-notifications-for-critical-red-alerts-all-tenant-members: backlog
+  epic-3-retrospective: optional
+
+  epic-4: backlog
+  4-1-dashboard-stock-overview-alerts-first-key-stats: backlog
+  4-2-alerts-dashboard-active-alerts-sorted-by-priority: backlog
+  4-3-pmi-indicator-mvp-formula-based-on-r-o-g-distribution: backlog
+  epic-4-retrospective: optional
+
+  epic-5: backlog
+  5-1-import-products-via-csv-validate-error-report: backlog
+  epic-5-retrospective: optional
+
+  epic-6: backlog
+  6-1-view-current-subscription-plan-limits: backlog
+  6-2-enforce-plan-limits-products-users: backlog
+  6-3-upgrade-downgrade-subscription-plan-via-stripe-checkout: backlog
+  6-4-access-billing-portal-for-invoices-payment-methods: backlog
+  epic-6-retrospective: optional

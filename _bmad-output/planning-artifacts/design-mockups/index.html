@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StockZen - Design Directions Comparison</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { font-family: 'Inter', sans-serif; }
+        .device-frame {
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+        }
+        iframe {
+            border: none;
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+    <!-- Header -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-6 py-4">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-2xl font-bold text-slate-900">StockZen</h1>
+                    <p class="text-sm text-slate-500">Design Directions - Choisissez votre direction visuelle</p>
+                </div>
+                <div class="flex items-center gap-4">
+                    <span class="text-sm text-slate-500">Projet: gestionnaire-stock</span>
+                    <span class="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-medium">UX Design Phase</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-6 py-8">
+        <!-- Introduction -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 mb-8">
+            <h2 class="text-lg font-semibold text-slate-900 mb-3">3 Directions de Design</h2>
+            <p class="text-slate-600 mb-4">
+                Chaque direction est conçue pour un persona spécifique mais peut s'adapter à tous. 
+                Explorez les mockups interactifs ci-dessous et choisissez celle qui correspond le mieux à votre vision pour StockZen.
+            </p>
+            <div class="flex flex-wrap gap-2">
+                <span class="px-3 py-1 bg-red-100 text-red-700 rounded-full text-xs font-medium">Critique: Action immédiate</span>
+                <span class="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-xs font-medium">Attention: Préparation</span>
+                <span class="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">Sain: Pas d'action</span>
+            </div>
+        </div>
+
+        <!-- Directions Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            <!-- Direction 1 -->
+            <div class="space-y-4">
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div class="p-4 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white">
+                        <div class="flex items-center gap-3 mb-2">
+                            <span class="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-sm">1</span>
+                            <h3 class="font-bold text-slate-900">Zen Minimal</h3>
+                        </div>
+                        <p class="text-sm text-slate-500">Pour Bernard - Boulanger à 4h du matin</p>
+                    </div>
+                    <div class="p-4 space-y-3 text-sm">
+                        <div class="flex items-start gap-2">
+                            <svg class="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                            </svg>
+                            <span class="text-slate-600">Ultra-simplifié, max 3 boutons visibles</span>
+                        </div>
+                        <div class="flex items-start gap-2">
+                            <svg class="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                            </svg>
+                            <span class="text-slate-600">Seules alertes critiques visibles</span>
+                        </div>
+                        <div class="flex items-start gap-2">
+                            <svg class="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                            </svg>
+                            <span class="text-slate-600">Design apaisant, couleurs douces</span>
+                        </div>
+                        <div class="flex items-start gap-2">
+                            <svg class="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                            </svg>
+                            <span class="text-slate-600">3-clicks maximum pour toute action</span>
+                        </div>
+                    </div>
+                    <div class="px-4 pb-4">
+                        <a href="direction-1-zen-minimal.html" target="_blank" class="block w-full py-3 bg-slate-900 text-white rounded-xl font-medium text-center hover:bg-slate-800 transition-colors">
+                            Voir le mockup complet
+                        </a>
+                    </div>
+                </div>
+                
+                <!-- Device Preview -->
+                <div class="device-frame bg-slate-900 rounded-[2.5rem] p-3 mx-auto w-[320px]">
+                    <div class="bg-white rounded-[2rem] overflow-hidden h-[600px] relative">
+                        <iframe src="direction-1-zen-minimal.html"></iframe>
+                        <div class="absolute inset-0 pointer-events-none border-[3px] border-slate-900 rounded-[2rem]"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Direction 2 -->
+            <div class="space-y-4">
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div class="p-4 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white">
+                        <div class="flex items-center gap-3 mb-2">
+                            <span class="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-sm">2</span>
+                            <h3 class="font-bold text-slate-900">Professional Command</h3>
+                        </div>
+                        <p class="text-sm text-slate-500">Pour Marc - Restaurateur 18 fournisseurs</p>
+                    </div>
+                    <div class="p-4 space-y-3 text-sm">
+                        <div class="flex items-start gap-2">
+                            <svg class="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                            </svg>
+                            <span class="text-slate-600">Interface dense mais organisée</span>
+                        </div>
+                        <div class="flex items-start gap-2">
+                            <svg class="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                            </svg>
+                            <span class="text-slate-600">Vue consolidée de tous les KPIs</span>
+                        </div>
+                        <div class="flex items-start gap-2">
+                            <svg class="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                            </svg>
+                            <span class="text-slate-600">Navigation sidebar technique</span>
+                        </div>
+                        <div class="flex items-start gap-2">
+                            <svg class="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                            </svg>
+                            <span class="text-slate-600">Dark theme professionnel</span>
+                        </div>
+                    </div>
+                    <div class="px-4 pb-4">
+                        <a href="direction-2-professional-command.html" target="_blank" class="block w-full py-3 bg-slate-900 text-white rounded-xl font-medium text-center hover:bg-slate-800 transition-colors">
+                            Voir le mockup complet
+                        </a>
+                    </div>
+                </div>
+                
+                <!-- Device Preview -->
+                <div class="relative mx-auto w-full max-w-[600px] h-[400px] rounded-xl overflow-hidden shadow-2xl border border-slate-300">
+                    <iframe src="direction-2-professional-command.html" class="w-full h-full" style="transform: scale(0.5); transform-origin: top left; width: 200%; height: 200%;"></iframe>
+                </div>
+            </div>
+
+            <!-- Direction 3 -->
+            <div class="space-y-4">
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div class="p-4 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white">
+                        <div class="flex items-center gap-3 mb-2">
+                            <span class="w-8 h-8 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center font-bold text-sm">3</span>
+                            <h3 class="font-bold text-slate-900">Smart Priority</h3>
+                        </div>
+                        <p class="text-sm text-slate-500">Pour tous - R/O/G centric</p>
+                    </div>
+                    <div class="p-4 space-y-3 text-sm">
+                        <div class="flex items-start gap-2">
+                            <svg class="w-5 h-5 text-purple-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                            </svg>
+                            <span class="text-slate-600">Système R/O/G central visuel</span>
+                        </div>
+                        <div class="flex items-start gap-2">
+                            <svg class="w-5 h-5 text-purple-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                            </svg>
+                            <span class="text-slate-600">Dashboard santé avec jauge</span>
+                        </div>
+                        <div class="flex items-start gap-2">
+                            <svg class="w-5 h-5 text-purple-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                            </svg>
+                            <span class="text-slate-600">Distribution priorités visible</span>
+                        </div>
+                        <div class="flex items-start gap-2">
+                            <svg class="w-5 h-5 text-purple-500 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                            </svg>
+                            <span class="text-slate-600">Design équilibré tous personas</span>
+                        </div>
+                    </div>
+                    <div class="px-4 pb-4">
+                        <a href="direction-3-smart-priority.html" target="_blank" class="block w-full py-3 bg-slate-900 text-white rounded-xl font-medium text-center hover:bg-slate-800 transition-colors">
+                            Voir le mockup complet
+                        </a>
+                    </div>
+                </div>
+                
+                <!-- Device Preview -->
+                <div class="device-frame bg-slate-900 rounded-[2.5rem] p-3 mx-auto w-[320px]">
+                    <div class="bg-white rounded-[2rem] overflow-hidden h-[600px] relative">
+                        <iframe src="direction-3-smart-priority.html"></iframe>
+                        <div class="absolute inset-0 pointer-events-none border-[3px] border-slate-900 rounded-[2rem]"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Comparison Table -->
+        <div class="mt-12 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="p-6 border-b border-slate-200">
+                <h2 class="text-lg font-semibold text-slate-900">Tableau Comparatif</h2>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead class="bg-slate-50">
+                        <tr>
+                            <th class="px-6 py-4 text-left text-sm font-semibold text-slate-900">Critère</th>
+                            <th class="px-6 py-4 text-left text-sm font-semibold text-emerald-700">Zen Minimal</th>
+                            <th class="px-6 py-4 text-left text-sm font-semibold text-blue-700">Professional Command</th>
+                            <th class="px-6 py-4 text-left text-sm font-semibold text-purple-700">Smart Priority</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-200">
+                        <tr>
+                            <td class="px-6 py-4 text-sm font-medium text-slate-900">Persona principal</td>
+                            <td class="px-6 py-4 text-sm text-slate-600">Bernard (Boulanger)</td>
+                            <td class="px-6 py-4 text-sm text-slate-600">Marc (Restaurateur)</td>
+                            <td class="px-6 py-4 text-sm text-slate-600">Tous les personas</td>
+                        </tr>
+                        <tr>
+                            <td class="px-6 py-4 text-sm font-medium text-slate-900">Densité visuelle</td>
+                            <td class="px-6 py-4 text-sm text-slate-600">Minimaliste</td>
+                            <td class="px-6 py-4 text-sm text-slate-600">Dense</td>
+                            <td class="px-6 py-4 text-sm text-slate-600">Équilibrée</td>
+                        </tr>
+                        <tr>
+                            <td class="px-6 py-4 text-sm font-medium text-slate-900">Navigation</td>
+                            <td class="px-6 py-4 text-sm text-slate-600">Invisible / Dashboard-only</td>
+                            <td class="px-6 py-4 text-sm text-slate-600">Sidebar complète</td>
+                            <td class="px-6 py-4 text-sm text-slate-600">Bottom nav simple</td>
+                        </tr>
+                        <tr>
+                            <td class="px-6 py-4 text-sm font-medium text-slate-900">Thème couleur</td>
+                            <td class="px-6 py-4 text-sm text-slate-600">Light / Soft</td>
+                            <td class="px-6 py-4 text-sm text-slate-600">Dark / Professional</td>
+                            <td class="px-6 py-4 text-sm text-slate-600">Light / R/O/G accent</td>
+                        </tr>
+                        <tr>
+                            <td class="px-6 py-4 text-sm font-medium text-slate-900">Élément unique</td>
+                            <td class="px-6 py-4 text-sm text-slate-600">3 boutons maximum</td>
+                            <td class="px-6 py-4 text-sm text-slate-600">Dashboard complet</td>
+                            <td class="px-6 py-4 text-sm text-slate-600">Jauge santé circulaire</td>
+                        </tr>
+                        <tr>
+                            <td class="px-6 py-4 text-sm font-medium text-slate-900">Adaptabilité</td>
+                            <td class="px-6 py-4 text-sm text-slate-600">Basique uniquement</td>
+                            <td class="px-6 py-4 text-sm text-slate-600">Avancé uniquement</td>
+                            <td class="px-6 py-4 text-sm text-slate-600">Progressive disclosure</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Recommendation -->
+        <div class="mt-8 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-2xl border border-blue-200 p-6">
+            <h3 class="font-semibold text-blue-900 mb-2">Recommandation UX</h3>
+            <p class="text-blue-800 text-sm mb-4">
+                La <strong>Direction 3: Smart Priority</strong> est recommandée car elle :
+            </p>
+            <ul class="space-y-2 text-sm text-blue-700">
+                <li class="flex items-start gap-2">
+                    <svg class="w-5 h-5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                    </svg>
+                    Met en avant le R/O/G, notre différenciateur clé
+                </li>
+                <li class="flex items-start gap-2">
+                    <svg class="w-5 h-5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                    </svg>
+                    S'adapte à tous les personas via progressive disclosure
+                </li>
+                <li class="flex items-start gap-2">
+                    <svg class="w-5 h-5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                    </svg>
+                    Équilibre simplicité et information complète
+                </li>
+            </ul>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-slate-200 mt-12">
+        <div class="max-w-7xl mx-auto px-6 py-6">
+            <p class="text-sm text-slate-500 text-center">
+                StockZen UX Design Specification • Created with BMAD Workflow • 2026
+            </p>
+        </div>
+    </footer>
+</body>
+</html>
