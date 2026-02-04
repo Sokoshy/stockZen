@@ -13,6 +13,7 @@ import { ZodError } from "zod";
 
 import { auth } from "~/server/better-auth";
 import { db } from "~/server/db";
+import { logger } from "~/server/logger";
 
 /**
  * 1. CONTEXT
@@ -97,7 +98,7 @@ const timingMiddleware = t.middleware(async ({ next, path }) => {
   const result = await next();
 
   const end = Date.now();
-  console.log(`[TRPC] ${path} took ${end - start}ms to execute`);
+  logger.debug({ path, durationMs: end - start }, "trpc request completed");
 
   return result;
 });
