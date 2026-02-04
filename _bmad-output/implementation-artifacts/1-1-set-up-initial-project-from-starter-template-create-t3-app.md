@@ -1,6 +1,6 @@
 # Story 1.1: Set up Initial Project from Starter Template (Create T3 App)
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -192,6 +192,8 @@ openai/gpt-5.2
 - `BETTER_AUTH_GITHUB_CLIENT_ID=dummy BETTER_AUTH_GITHUB_CLIENT_SECRET=dummy bun run build`
 - `bun add next@15.5.7`
 - `BETTER_AUTH_GITHUB_CLIENT_ID=dummy BETTER_AUTH_GITHUB_CLIENT_SECRET=dummy bun run dev` (startup verified after Next.js alignment)
+- `bun add pino`
+- `bun remove @auth/drizzle-adapter`
 
 ### Completion Notes List
 
@@ -202,11 +204,16 @@ openai/gpt-5.2
 - Added `BETTER_AUTH_BASE_URL` to config to remove Better Auth base URL warnings.
 - Aligned Next.js to 15.5.7 to remove the @next/swc version mismatch warning.
 - Revalidated `bun run dev` after Next.js alignment.
+- Removed Prisma/NextAuth references and dropped the unused auth adapter dependency.
+- Added pino logger usage and removed console logging in server handlers.
+- Fixed Drizzle table filtering and updated env sample placeholders.
+- Set Next.js output to standalone for Docker alignment.
 
 ### File List
 
 - `_bmad-output/implementation-artifacts/1-1-set-up-initial-project-from-starter-template-create-t3-app.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
+- `docker-compose.yml`
 - `apps/web/.env.example`
 - `apps/web/.gitignore`
 - `apps/web/README.md`
@@ -217,6 +224,7 @@ openai/gpt-5.2
 - `apps/web/package.json`
 - `apps/web/postcss.config.js`
 - `apps/web/public/favicon.ico`
+- `apps/web/public/favicon.svg`
 - `apps/web/src/app/_components/post.tsx`
 - `apps/web/src/app/api/auth/[...all]/route.ts`
 - `apps/web/src/app/api/trpc/[trpc]/route.ts`
@@ -233,6 +241,7 @@ openai/gpt-5.2
 - `apps/web/src/server/better-auth/config.ts`
 - `apps/web/src/server/better-auth/index.ts`
 - `apps/web/src/server/better-auth/server.ts`
+- `apps/web/src/server/logger.ts`
 - `apps/web/src/server/db/index.ts`
 - `apps/web/src/server/db/schema.ts`
 - `apps/web/src/styles/globals.css`
@@ -248,3 +257,4 @@ openai/gpt-5.2
 - 2026-02-04: Moved Better Auth GitHub redirect URI to env configuration.
 - 2026-02-04: Added Better Auth base URL config via environment variable.
 - 2026-02-04: Aligned Next.js to 15.5.7 to resolve @next/swc mismatch warning.
+- 2026-02-04: Removed Prisma/NextAuth remnants, added pino logging, and updated env/drizzle/Next config alignment.
