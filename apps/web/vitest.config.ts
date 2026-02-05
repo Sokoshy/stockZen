@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: "jsdom",
+    environmentMatchGlobs: [["**/tests/integration/**", "node"]],
     globals: true,
     setupFiles: ["./tests/setup.ts"],
     coverage: {
@@ -20,6 +21,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "~": path.resolve(__dirname, "./src"),
+      "server-only": path.resolve(__dirname, "./tests/helpers/server-only.ts"),
     },
   },
   // Prevent tree-shaking of server-side code
