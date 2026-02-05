@@ -22,6 +22,11 @@ const handler = (req: NextRequest) =>
     req,
     router: appRouter,
     createContext: () => createContext(req),
+    responseMeta({ ctx }) {
+      return {
+        headers: ctx?.responseHeaders,
+      };
+    },
     onError:
       env.NODE_ENV === "development"
         ? ({ path, error }) => {

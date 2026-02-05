@@ -8,11 +8,14 @@
  */
 
 import { initTRPC, TRPCError } from "@trpc/server";
+import { eq } from "drizzle-orm";
 import superjson from "superjson";
 import { ZodError } from "zod";
 
 import { auth } from "~/server/better-auth";
 import { db } from "~/server/db";
+import { user } from "~/server/db/schema";
+import { withTenantContext } from "~/server/db/rls";
 import { logger } from "~/server/logger";
 
 /**
@@ -28,12 +31,25 @@ import { logger } from "~/server/logger";
  * @see https://trpc.io/docs/server/context
  */
 export const createTRPCContext = async (opts: { headers: Headers }) => {
+  const responseHeaders = new Headers();
   const session = await auth.api.getSession({
     headers: opts.headers,
   });
+
+  let tenantId: string | null = null;
+  if (session?.user?.id) {
+    const userRecord = await db.query.user.findFirst({
+      columns: { defaultTenantId: true },
+      where: eq(user.id, session.user.id),
+    });
+    tenantId = userRecord?.defaultTenantId ?? null;
+  }
+
   return {
     db,
     session,
+    tenantId,
+    responseHeaders,
     ...opts,
   };
 };
@@ -122,14 +138,26 @@ export const publicProcedure = t.procedure.use(timingMiddleware);
  */
 export const protectedProcedure = t.procedure
   .use(timingMiddleware)
-  .use(({ ctx, next }) => {
+  .use(async ({ ctx, next }) => {
     if (!ctx.session?.user) {
       throw new TRPCError({ code: "UNAUTHORIZED" });
     }
-    return next({
-      ctx: {
-        // infers the `session` as non-nullable
-        session: { ...ctx.session, user: ctx.session.user },
-      },
-    });
+
+    if (!ctx.tenantId) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Tenant context is required for this operation.",
+      });
+    }
+
+    return withTenantContext(ctx.tenantId, async (tx) =>
+      next({
+        ctx: {
+          ...ctx,
+          db: tx,
+          tenantId: ctx.tenantId,
+          session: { ...ctx.session, user: ctx.session.user },
+        },
+      })
+    );
   });
