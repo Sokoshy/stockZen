@@ -6,30 +6,16 @@ import {
   pgTableCreator,
   text,
   timestamp,
+  uuid,
+  varchar,
+  pgEnum,
 } from "drizzle-orm/pg-core";
 
 export const createTable = pgTableCreator((name) => `pg-drizzle_${name}`);
 
-export const posts = createTable(
-  "post",
-  (d) => ({
-    id: d.integer().primaryKey().generatedByDefaultAsIdentity(),
-    name: d.varchar({ length: 256 }),
-    createdById: d
-      .varchar({ length: 255 })
-      .notNull()
-      .references(() => user.id),
-    createdAt: d
-      .timestamp({ withTimezone: true })
-      .$defaultFn(() => new Date())
-      .notNull(),
-    updatedAt: d.timestamp({ withTimezone: true }).$onUpdate(() => new Date()),
-  }),
-  (t) => [
-    index("created_by_idx").on(t.createdById),
-    index("name_idx").on(t.name),
-  ]
-);
+// ============================================
+// Better Auth Tables (managed by Better Auth)
+// ============================================
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -91,9 +77,74 @@ export const verification = pgTable("verification", {
   ),
 });
 
+// ============================================
+// Tenant Management Tables
+// ============================================
+
+export const tenantRoleEnum = pgEnum("tenant_role", [
+  "Admin",
+  "Manager",
+  "Operator",
+]);
+
+export const tenants = pgTable("tenants", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: varchar("name", { length: 255 }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .$defaultFn(() => new Date())
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .$defaultFn(() => new Date())
+    .notNull(),
+});
+
+export const tenantMemberships = pgTable("tenant_memberships", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id")
+    .notNull()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  role: tenantRoleEnum("role").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .$defaultFn(() => new Date())
+    .notNull(),
+});
+
+// ============================================
+// Example/Demo Table (can be removed later)
+// ============================================
+
+export const posts = createTable(
+  "post",
+  (d) => ({
+    id: d.integer().primaryKey().generatedByDefaultAsIdentity(),
+    name: d.varchar({ length: 256 }),
+    createdById: d
+      .varchar({ length: 255 })
+      .notNull()
+      .references(() => user.id),
+    createdAt: d
+      .timestamp({ withTimezone: true })
+      .$defaultFn(() => new Date())
+      .notNull(),
+    updatedAt: d.timestamp({ withTimezone: true }).$onUpdate(() => new Date()),
+  }),
+  (t) => [
+    index("created_by_idx").on(t.createdById),
+    index("name_idx").on(t.name),
+  ]
+);
+
+// ============================================
+// Relations
+// ============================================
+
 export const userRelations = relations(user, ({ many }) => ({
   account: many(account),
   session: many(session),
+  memberships: many(tenantMemberships),
 }));
 
 export const accountRelations = relations(account, ({ one }) => ({
@@ -103,3 +154,32 @@ export const accountRelations = relations(account, ({ one }) => ({
 export const sessionRelations = relations(session, ({ one }) => ({
   user: one(user, { fields: [session.userId], references: [user.id] }),
 }));
+
+export const tenantsRelations = relations(tenants, ({ many }) => ({
+  memberships: many(tenantMemberships),
+}));
+
+export const tenantMembershipsRelations = relations(
+  tenantMemberships,
+  ({ one }) => ({
+    tenant: one(tenants, {
+      fields: [tenantMemberships.tenantId],
+      references: [tenants.id],
+    }),
+    user: one(user, {
+      fields: [tenantMemberships.userId],
+      references: [user.id],
+    }),
+  })
+);
+
+// ============================================
+// Type Exports
+// ============================================
+
+export type User = typeof user.$inferSelect;
+export type NewUser = typeof user.$inferInsert;
+export type Tenant = typeof tenants.$inferSelect;
+export type NewTenant = typeof tenants.$inferInsert;
+export type TenantMembership = typeof tenantMemberships.$inferSelect;
+export type NewTenantMembership = typeof tenantMemberships.$inferInsert;
