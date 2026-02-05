@@ -2,20 +2,24 @@ import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
 
 import { signUpSchema, signUpResponseSchema } from "~/schemas/auth";
-import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
+import { createTRPCRouter, protectedProcedure, publicProcedure } from "~/server/api/trpc";
 import { auth } from "~/server/better-auth";
-import { db } from "~/server/db";
+import { buildSessionCookie, extractSessionToken } from "~/server/better-auth/session-cookie";
+import { setTenantContext } from "~/server/db/rls";
 import { tenantMemberships, tenants, user } from "~/server/db/schema";
+import { logger } from "~/server/logger";
+import { getClientIp, rateLimit } from "~/server/rate-limit";
 
 export const authRouter = createTRPCRouter({
   /**
    * Sign up a new user with tenant creation
    * This creates:
-   * 1. A new tenant
-   * 2. A new user (via Better Auth)
+   * 1. A new user (via Better Auth)
+   * 2. A new tenant
    * 3. A tenant membership with Admin role
-   * 
-   * All operations are performed in a transaction to ensure atomicity
+   *
+   * Tenant creation and membership are transactional; user creation is cleaned
+   * up if any downstream step fails.
    */
   signUp: publicProcedure
     .input(signUpSchema)
@@ -23,22 +27,58 @@ export const authRouter = createTRPCRouter({
     .mutation(async ({ input, ctx }) => {
       const { email, password, tenantName } = input;
 
-      try {
-        // Check if email is already in use
-        const existingUser = await db.query.user.findFirst({
-          where: eq(user.email, email),
+      const rateKey = `sign-up:${getClientIp(ctx.headers)}`;
+      const rateResult = rateLimit(rateKey, { limit: 5, windowMs: 60_000 });
+      if (!rateResult.allowed) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: "Too many sign up attempts. Please try again later.",
         });
+      }
 
-        if (existingUser) {
-          throw new TRPCError({
-            code: "CONFLICT",
-            message: "An account with this email already exists",
-          });
-        }
+      // Check if email is already in use
+      const existingUser = await ctx.db.query.user.findFirst({
+        where: eq(user.email, email),
+      });
 
-        // Create tenant, user, and membership in a transaction
-        const result = await db.transaction(async (tx) => {
-          // 1. Create the tenant
+      if (existingUser) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "An account with this email already exists",
+        });
+      }
+
+      const userName = email.split("@")[0] ?? email;
+      let betterAuthResult: Awaited<ReturnType<typeof auth.api.signUpEmail>>;
+
+      try {
+        betterAuthResult = await auth.api.signUpEmail({
+          body: {
+            email,
+            password,
+            name: userName,
+            callbackURL: "/dashboard",
+          },
+          headers: ctx.headers,
+        });
+      } catch (error) {
+        logger.error({ error: (error as Error).message }, "Sign up failed");
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "An error occurred during sign up. Please try again.",
+        });
+      }
+
+      if (!betterAuthResult?.user?.id) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to create user account",
+        });
+      }
+
+      try {
+        // Create tenant and membership in a transaction
+        const result = await ctx.db.transaction(async (tx) => {
           const [newTenant] = await tx
             .insert(tenants)
             .values({
@@ -56,25 +96,8 @@ export const authRouter = createTRPCRouter({
             });
           }
 
-          // 2. Create the user via Better Auth
-          const userName = email.split("@")[0] ?? email; // Use email prefix as default name
-          const betterAuthResult = await auth.api.signUpEmail({
-            body: {
-              email,
-              password,
-              name: userName,
-              callbackURL: "/dashboard",
-            },
-          });
+          await setTenantContext(newTenant.id, tx);
 
-          if (!betterAuthResult?.user?.id) {
-            throw new TRPCError({
-              code: "INTERNAL_SERVER_ERROR",
-              message: "Failed to create user account",
-            });
-          }
-
-          // 3. Create tenant membership with Admin role
           const [membership] = await tx
             .insert(tenantMemberships)
             .values({
@@ -93,11 +116,34 @@ export const authRouter = createTRPCRouter({
             });
           }
 
+          await tx
+            .update(user)
+            .set({ defaultTenantId: newTenant.id })
+            .where(eq(user.id, betterAuthResult.user.id));
+
           return {
             user: betterAuthResult.user,
             tenant: newTenant,
           };
         });
+
+        const sessionInfo = extractSessionToken(betterAuthResult);
+        if (sessionInfo.setCookie) {
+          ctx.responseHeaders.append("Set-Cookie", sessionInfo.setCookie);
+        } else if (sessionInfo.token) {
+          ctx.responseHeaders.append(
+            "Set-Cookie",
+            buildSessionCookie({
+              token: sessionInfo.token,
+              expiresAt: sessionInfo.expiresAt,
+            })
+          );
+        } else {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Failed to establish a session after sign up.",
+          });
+        }
 
         return {
           success: true,
@@ -113,15 +159,21 @@ export const authRouter = createTRPCRouter({
           },
         };
       } catch (error) {
-        // Handle specific error types
+        try {
+          await ctx.db.delete(user).where(eq(user.id, betterAuthResult.user.id));
+        } catch (cleanupError) {
+          logger.error(
+            { error: (cleanupError as Error).message },
+            "Failed to clean up user after sign up error"
+          );
+        }
+
         if (error instanceof TRPCError) {
           throw error;
         }
 
-        // Log unexpected errors (without exposing sensitive details)
-        console.error("Sign up error:", error);
+        logger.error({ error: (error as Error).message }, "Sign up error");
 
-        // Return generic error to avoid exposing system details
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: "An error occurred during sign up. Please try again.",
@@ -132,12 +184,8 @@ export const authRouter = createTRPCRouter({
   /**
    * Get the current authenticated user's tenant memberships
    */
-  getTenantMemberships: publicProcedure.query(async ({ ctx }) => {
-    if (!ctx.session?.user) {
-      return [];
-    }
-
-    const memberships = await db.query.tenantMemberships.findMany({
+  getTenantMemberships: protectedProcedure.query(async ({ ctx }) => {
+    const memberships = await ctx.db.query.tenantMemberships.findMany({
       where: eq(tenantMemberships.userId, ctx.session.user.id),
       with: {
         tenant: true,
