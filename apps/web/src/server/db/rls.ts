@@ -1,4 +1,10 @@
+import { sql } from "drizzle-orm";
+
 import { db } from "./index";
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import type * as schema from "./schema";
+
+type DbClient = Pick<PostgresJsDatabase<typeof schema>, "execute">;
 
 /**
  * Set the tenant context for RLS policies
@@ -11,13 +17,14 @@ import { db } from "./index";
  * const data = await db.select().from(someTenantScopedTable);
  * ```
  */
-export async function setTenantContext(tenantId: string | null): Promise<void> {
-  const client = await db.$client;
-  
+export async function setTenantContext(
+  tenantId: string | null,
+  client: DbClient = db
+): Promise<void> {
+  const value = tenantId ?? "";
+  await client.execute(sql`SELECT set_config('app.tenant_id', ${value}, true)`);
   if (tenantId) {
-    await client`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
-  } else {
-    await client`SELECT set_config('app.tenant_id', '', true)`;
+    await client.execute(sql`SELECT set_config('row_security', 'on', true)`);
   }
 }
 
@@ -25,18 +32,29 @@ export async function setTenantContext(tenantId: string | null): Promise<void> {
  * Clear the tenant context
  * Use this when you need to bypass RLS (e.g., for admin operations)
  */
-export async function clearTenantContext(): Promise<void> {
-  const client = await db.$client;
-  await client`SELECT set_config('app.tenant_id', '', true)`;
+export async function clearTenantContext(client: DbClient = db): Promise<void> {
+  await client.execute(sql`SELECT set_config('app.tenant_id', '', true)`);
+  await client.execute(sql`SELECT set_config('row_security', 'off', true)`);
 }
 
 /**
  * Get the current tenant context
  * Returns null if no context is set
  */
-export async function getTenantContext(): Promise<string | null> {
-  const client = await db.$client;
-  const result = await client`SELECT current_setting('app.tenant_id', true) as tenant_id`;
-  const tenantId = result[0]?.tenant_id;
+export async function getTenantContext(client: DbClient = db): Promise<string | null> {
+  const result = await client.execute(
+    sql`SELECT current_setting('app.tenant_id', true) as tenant_id`
+  );
+  const tenantId = result[0]?.tenant_id as string | undefined;
   return tenantId || null;
+}
+
+export async function withTenantContext<T>(
+  tenantId: string,
+  action: (tx: PostgresJsDatabase<typeof schema>) => Promise<T>
+): Promise<T> {
+  return db.transaction(async (tx) => {
+    await setTenantContext(tenantId, tx);
+    return action(tx);
+  });
 }

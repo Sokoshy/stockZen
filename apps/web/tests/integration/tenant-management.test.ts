@@ -1,16 +1,49 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { eq, sql } from "drizzle-orm";
 
-import { db } from "~/server/db";
-import { tenants } from "~/server/db/schema";
-import { setTenantContext, clearTenantContext, getTenantContext } from "~/server/db/rls";
-import { generateTestTenantName } from "../helpers/database";
+import { tenants, tenantMemberships, user } from "~/server/db/schema";
+import {
+  clearTenantContext,
+  getTenantContext,
+  setTenantContext,
+  withTenantContext,
+} from "~/server/db/rls";
+import {
+  cleanDatabase,
+  createTestDb,
+  generateTestEmail,
+  generateTestTenantName,
+} from "../helpers/database";
 
 describe("Tenant Management", () => {
+  const testDb = createTestDb();
+
+  beforeAll(async () => {
+    await testDb.execute(sql`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'stockzen_app') THEN
+          CREATE ROLE stockzen_app;
+        END IF;
+      END
+      $$;
+    `);
+
+    await testDb.execute(sql`GRANT USAGE ON SCHEMA public TO stockzen_app;`);
+    await testDb.execute(
+      sql`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO stockzen_app;`
+    );
+  });
+
+  beforeEach(async () => {
+    await cleanDatabase(testDb);
+  });
+
   describe("Database Schema", () => {
     it("should create a tenant with valid data", async () => {
       const tenantName = generateTestTenantName();
 
-      const [tenant] = await db
+      const [tenant] = await testDb
         .insert(tenants)
         .values({ name: tenantName })
         .returning();
@@ -29,7 +62,7 @@ describe("Tenant Management", () => {
         generateTestTenantName(),
       ];
 
-      const createdTenants = await db
+      const createdTenants = await testDb
         .insert(tenants)
         .values(tenantNames.map((name) => ({ name })))
         .returning();
@@ -76,7 +109,7 @@ describe("Tenant Management", () => {
 
   describe("RLS Policies", () => {
     it("should verify RLS is enabled on tenants table", async () => {
-      const rlsCheck = await db.execute(`
+      const rlsCheck = await testDb.execute(`
         SELECT relname, relrowsecurity 
         FROM pg_class 
         WHERE relname = 'tenants'
@@ -88,7 +121,7 @@ describe("Tenant Management", () => {
     });
 
     it("should verify RLS policies exist for tenants table", async () => {
-      const policies = await db.execute(`
+      const policies = await testDb.execute(`
         SELECT tablename, policyname 
         FROM pg_policies 
         WHERE tablename = 'tenants'
@@ -101,6 +134,59 @@ describe("Tenant Management", () => {
       expect(policyNames).toContain("tenant_isolation_insert");
       expect(policyNames).toContain("tenant_isolation_update");
       expect(policyNames).toContain("tenant_isolation_delete");
+    });
+  });
+
+  describe("Tenant Isolation", () => {
+    it("should prevent cross-tenant reads and writes", async () => {
+      const [tenantA, tenantB] = await testDb
+        .insert(tenants)
+        .values([
+          { name: generateTestTenantName() },
+          { name: generateTestTenantName() },
+        ])
+        .returning();
+
+      const [userA, userB] = await testDb
+        .insert(user)
+        .values([
+          {
+            id: "user-a",
+            name: "User A",
+            email: generateTestEmail(),
+          },
+          {
+            id: "user-b",
+            name: "User B",
+            email: generateTestEmail(),
+          },
+        ])
+        .returning();
+
+      await testDb.insert(tenantMemberships).values([
+        { tenantId: tenantA.id, userId: userA.id, role: "Admin" },
+        { tenantId: tenantB.id, userId: userB.id, role: "Admin" },
+      ]);
+
+      await withTenantContext(tenantA.id, async (tx) => {
+        await tx.execute(sql`SET LOCAL ROLE stockzen_app`);
+        await tx.execute(sql`SET LOCAL row_security = on`);
+
+        const visibleTenants = await tx.select().from(tenants);
+        expect(visibleTenants).toHaveLength(1);
+        expect(visibleTenants[0]?.id).toBe(tenantA.id);
+
+        const visibleMemberships = await tx.select().from(tenantMemberships);
+        expect(visibleMemberships).toHaveLength(1);
+        expect(visibleMemberships[0]?.tenantId).toBe(tenantA.id);
+
+        const updated = await tx
+          .update(tenants)
+          .set({ name: "Blocked Update" })
+          .where(eq(tenants.id, tenantB.id))
+          .returning();
+        expect(updated).toHaveLength(0);
+      });
     });
   });
 });
