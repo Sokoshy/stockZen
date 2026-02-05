@@ -16,16 +16,14 @@
 - check-implementation-readiness [x] 
 
 ## phase quatre:
-  -
-  -
-  -
+  - sprint-planning [x]
+  - create-story
+  - dev-story
+  - code-review
 
-• Story 2.2 est ajoutée dans _bmad-output/planning-artifacts/epics.md.
-
-  Prochaine story (Epic 2) : Story 2.3 Record Stock Entry/Exit (3-click loop, offline) (FR4–FR6).
-  Question : pour un mouvement, tu veux saisir uniquement quantity + type (entrée/sortie), ou aussi une note (optionnelle) dès le début ?
-Token usage: total=207,979 input=171,838 (+ 3,329,536 cached) output=36,141 (reasoning 13,619)
-To continue this session, run codex resume 019c235e-d30a-78c2-bc8f-7f20b64beccb
+.env gardé.  
+bun run dev a démarré correctement et la page / compile. Le serveur est prêt, puis arrêté au bout de 2 minutes (timeout).
+Prochaine étape: démarrer l’implémentation de la story 1‑2 ?
 
 
 
