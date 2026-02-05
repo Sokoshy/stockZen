@@ -42,7 +42,7 @@ story_location: "{project-root}/_bmad-output/implementation-artifacts"
 development_status:
   epic-1: in-progress
   1-1-set-up-initial-project-from-starter-template-create-t3-app: done
-  1-2-sign-up-create-tenant-admin-start-session: review
+  1-2-sign-up-create-tenant-admin-start-session: done
   1-3-login-logout-short-session-remember-me: backlog
   1-4-password-reset-via-email-link-one-time-token: backlog
   1-5-team-membership-roles-management-admin-manager-operator: backlog

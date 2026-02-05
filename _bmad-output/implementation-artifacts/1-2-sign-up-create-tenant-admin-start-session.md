@@ -1,6 +1,6 @@
 # Story 1.2: Sign up + Create Tenant (Admin) + Start Session
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -239,7 +239,8 @@ So that I can start using StockZen with my organization securely isolated.
 
 ### Agent Model Used
 
-Kimi-K2.5 (via OpenCode)
+- Kimi-K2.5 (via OpenCode)
+- gpt-5.2-codex (OpenCode) — review fixes
 
 ### Debug Log References
 
@@ -250,22 +251,26 @@ Kimi-K2.5 (via OpenCode)
 - UI component development with React Hook Form
 - Test framework setup (Vitest) and test implementation
 - Build verification successful
+- Review fixes: session cookie propagation + tenant context enforcement
+- Review fixes: rate limiting and test environment alignment
 
 ### Completion Notes List
 
-1. **Better Auth Configuration**: Updated configuration with secure cookie settings (httpOnly, secure in production, sameSite: lax), session expiration (7 days), and secret validation. Added support for custom user fields (defaultTenantId).
+1. **Better Auth + Sessions**: Propagated session cookies from the tRPC sign-up response and derived tenant context via default tenant id.
 
-2. **Database Schema**: Created tenants table with UUID PK, tenant_memberships junction table with role enum (Admin/Manager/Operator), and integrated with existing Better Auth user table. RLS policies enabled on all tenant-scoped tables.
+2. **Database Schema**: Added `defaultTenantId` to users with a migration and index to support tenant context lookup.
 
-3. **Sign-up API**: Implemented atomic transaction in auth.signUp mutation that creates tenant → user → membership in a single transaction. Proper error handling with TRPCError for different failure scenarios.
+3. **Sign-up API**: Added rate limiting, created user via Better Auth, then created tenant + membership in a transaction with tenant context and cleanup on failure.
 
-4. **Sign-up UI**: Created complete sign-up form with email, password, confirm password, and organization name fields. Client-side validation using react-hook-form and zod. Loading states and error messages implemented.
+4. **Tenant Context Enforcement**: Protected procedures now run inside `withTenantContext` transactions; tenant id resolved per request.
 
-5. **RLS Context Helper**: Implemented setTenantContext, clearTenantContext, and getTenantContext functions for managing PostgreSQL RLS context per request.
+5. **Sign-up UI**: Server-side errors now map to field-level messages (duplicate email + Zod field errors).
 
-6. **Tests**: Created 12 unit tests for validation logic (password, email, sign-up schema) and 8 integration tests for tenant management and RLS policies. All 20 tests passing.
+6. **Tests**: Added integration coverage for sign-up flow (cookie + membership) and expanded RLS anti-leak checks; test env uses a dedicated DB.
 
-7. **Type Safety**: All code passes TypeScript type checking with no errors. Build completes successfully.
+7. **Migrations**: Added Better Auth base migration and aligned Drizzle migration journal/paths.
+
+8. **Test Infrastructure**: Stubbed `server-only` for Vitest and enforced RLS with a non-superuser role in integration tests.
 
 ### File List
 
@@ -279,20 +284,32 @@ Kimi-K2.5 (via OpenCode)
 - `apps/web/src/app/(auth)/signup/page.tsx` - Sign-up page
 - `apps/web/src/app/(auth)/layout.tsx` - Auth layout
 - `apps/web/src/app/dashboard/page.tsx` - Dashboard page (post-signup redirect)
-- `apps/web/drizzle/migrations/0001_tenants_users_memberships.sql` - Database migration
+- `apps/web/drizzle/0000_better_auth_tables.sql` - Better Auth tables migration
+- `apps/web/drizzle/0001_tenants_users_memberships.sql` - Database migration
+- `apps/web/drizzle/0002_add_default_tenant_id.sql` - Add default tenant to users
 - `apps/web/vitest.config.ts` - Vitest configuration
 - `apps/web/tests/setup.ts` - Test setup
 - `apps/web/tests/helpers/database.ts` - Test utilities
+- `apps/web/tests/helpers/server-only.ts` - server-only test stub
 - `apps/web/tests/unit/auth/validation.test.ts` - Unit tests for validation
 - `apps/web/tests/integration/tenant-management.test.ts` - Integration tests
+- `apps/web/tests/integration/auth-signup.test.ts` - Integration tests for sign-up flow
+- `apps/web/src/server/better-auth/session-cookie.ts` - Session cookie helpers
+- `apps/web/src/server/rate-limit.ts` - In-memory rate limiting helper
 
 **Modified Files:**
 - `apps/web/src/server/better-auth/config.ts` - Added secure cookie config and session settings
-- `apps/web/src/server/db/schema.ts` - Added tenants and tenant_memberships tables with relations
+- `apps/web/src/server/db/schema.ts` - Added tenant tables and defaultTenantId on users
 - `apps/web/src/server/api/root.ts` - Added auth router
+- `apps/web/src/server/api/trpc.ts` - Added tenant context and response headers
+- `apps/web/src/app/api/trpc/[trpc]/route.ts` - Propagate Set-Cookie headers
+- `apps/web/src/server/api/routers/auth.ts` - Rate limiting, tenant context, session cookie
+- `apps/web/src/server/db/rls.ts` - Transaction-based tenant context helper
+- `apps/web/src/features/auth/components/sign-up-form.tsx` - Field-level server error handling
+- `apps/web/tests/setup.ts` - Test env defaults for auth + DB
+- `apps/web/tests/integration/tenant-management.test.ts` - Added RLS anti-leak coverage
+- `apps/web/drizzle/meta/_journal.json` - Added migration journal entries
 - `apps/web/src/lib/env.ts` - Updated BETTER_AUTH_SECRET validation
 - `apps/web/package.json` - Added test scripts and testing dependencies
-- `apps/web/.env` - Updated DATABASE_URL for local development
 - `apps/web/.env.example` - Documented environment variables
 - `_bmad-output/implementation-artifacts/sprint-status.yaml` - Updated story status to in-progress/review
-
