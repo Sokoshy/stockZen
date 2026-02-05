@@ -16,6 +16,21 @@ export function SignUpForm({ onSuccess }: SignUpFormProps) {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
 
+  const {
+    register,
+    handleSubmit,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm<SignUpInput>({
+    resolver: zodResolver(signUpSchema),
+    defaultValues: {
+      email: "",
+      password: "",
+      confirmPassword: "",
+      tenantName: "",
+    },
+  });
+
   const signUpMutation = api.auth.signUp.useMutation({
     onSuccess: (data) => {
       if (data.success) {
@@ -25,21 +40,31 @@ export function SignUpForm({ onSuccess }: SignUpFormProps) {
       }
     },
     onError: (error) => {
-      setServerError(error.message);
-    },
-  });
+      setServerError(null);
 
-  const {
-    register,
-    handleSubmit,
-    formState: { errors, isSubmitting },
-  } = useForm<SignUpInput>({
-    resolver: zodResolver(signUpSchema),
-    defaultValues: {
-      email: "",
-      password: "",
-      confirmPassword: "",
-      tenantName: "",
+      const fieldErrors = error.data?.zodError?.fieldErrors;
+      if (fieldErrors) {
+        Object.entries(fieldErrors).forEach(([field, messages]) => {
+          const message = messages?.[0];
+          if (message) {
+            setError(field as keyof SignUpInput, {
+              type: "server",
+              message,
+            });
+          }
+        });
+        return;
+      }
+
+      if (error.data?.code === "CONFLICT") {
+        setError("email", {
+          type: "server",
+          message: error.message,
+        });
+        return;
+      }
+
+      setServerError(error.message);
     },
   });
 
