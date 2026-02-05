@@ -25,6 +25,9 @@ export const user = pgTable("user", {
     .$defaultFn(() => false)
     .notNull(),
   image: text("image"),
+  defaultTenantId: uuid("default_tenant_id").references(() => tenants.id, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at")
     .$defaultFn(() => /* @__PURE__ */ new Date())
     .notNull(),

@@ -1,5 +1,24 @@
 {
   "version": "7",
   "dialect": "postgresql",
-  "entries": []
+  "entries": [
+    {
+      "idx": 0,
+      "when": 1760000000000,
+      "tag": "0000_better_auth_tables",
+      "breakpoints": false
+    },
+    {
+      "idx": 1,
+      "when": 1760000001000,
+      "tag": "0001_tenants_users_memberships",
+      "breakpoints": false
+    },
+    {
+      "idx": 2,
+      "when": 1760000002000,
+      "tag": "0002_add_default_tenant_id",
+      "breakpoints": false
+    }
+  ]
 }
