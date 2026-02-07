@@ -1,15 +1,15 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { LoginForm } from "~/features/auth/components/login-form";
+import { ForgotPasswordForm } from "~/features/auth/components/forgot-password-form";
 import { getSession } from "~/server/better-auth/server";
 
 export const metadata = {
-  title: "Sign In - StockZen",
-  description: "Sign in to your StockZen account",
+  title: "Forgot Password - StockZen",
+  description: "Request a password reset link for your StockZen account",
 };
 
-export default async function LoginPage() {
+export default async function ForgotPasswordPage() {
   const session = await getSession();
 
   if (session) {
@@ -20,25 +20,22 @@ export default async function LoginPage() {
     <div className="flex min-h-screen flex-col justify-center bg-gray-50 px-6 py-12 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-sm">
         <h2 className="mt-10 text-center text-2xl font-bold leading-9 tracking-tight text-gray-900">
-          Sign in to your account
+          Forgot your password?
         </h2>
+        <p className="mt-2 text-center text-sm text-gray-600">
+          Enter your email address and we&apos;ll send you a reset link.
+        </p>
       </div>
 
       <div className="mt-10 sm:mx-auto sm:w-full sm:max-w-sm">
         <div className="bg-white px-6 py-12 shadow sm:rounded-lg sm:px-12">
-          <LoginForm />
-
-          <p className="mt-6 text-right text-sm">
-            <Link href="/forgot-password" className="font-medium leading-6 text-indigo-600 hover:text-indigo-500">
-              Forgot password?
-            </Link>
-          </p>
+          <ForgotPasswordForm />
         </div>
 
         <p className="mt-10 text-center text-sm text-gray-500">
-          Don&apos;t have an account?{" "}
-          <Link href="/signup" className="font-semibold leading-6 text-indigo-600 hover:text-indigo-500">
-            Sign up
+          Remembered your password?{" "}
+          <Link href="/login" className="font-semibold leading-6 text-indigo-600 hover:text-indigo-500">
+            Sign in
           </Link>
         </p>
       </div>
