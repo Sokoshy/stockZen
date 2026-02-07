@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { loginSchema, passwordSchema, signUpSchema } from "~/schemas/auth";
+import {
+  loginSchema,
+  passwordSchema,
+  requestPasswordResetResponseSchema,
+  requestPasswordResetSchema,
+  resetPasswordResponseSchema,
+  resetPasswordSubmitSchema,
+  resetPasswordSchema,
+  signUpSchema,
+} from "~/schemas/auth";
 
 describe("passwordSchema", () => {
   it("should accept valid passwords", () => {
@@ -187,5 +196,132 @@ describe("loginSchema", () => {
     });
 
     expect(result.success).toBe(false);
+  });
+});
+
+describe("requestPasswordResetSchema", () => {
+  it("should accept valid reset request email", () => {
+    const result = requestPasswordResetSchema.safeParse({
+      email: "test@example.com",
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("should reject invalid email", () => {
+    const result = requestPasswordResetSchema.safeParse({
+      email: "invalid-email",
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("should require non-empty email", () => {
+    const result = requestPasswordResetSchema.safeParse({
+      email: "",
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.errors.at(0)?.message).toContain("Email is required");
+    }
+  });
+});
+
+describe("resetPasswordSchema", () => {
+  it("should accept valid reset password payload", () => {
+    const result = resetPasswordSchema.safeParse({
+      token: "valid-token",
+      newPassword: "NewPassword123",
+      confirmPassword: "NewPassword123",
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("should reject when confirmation does not match", () => {
+    const result = resetPasswordSchema.safeParse({
+      token: "valid-token",
+      newPassword: "NewPassword123",
+      confirmPassword: "DifferentPassword123",
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.errors.at(0)?.message).toContain("do not match");
+    }
+  });
+
+  it("should reject weak new password using shared policy", () => {
+    const result = resetPasswordSchema.safeParse({
+      token: "valid-token",
+      newPassword: "weak",
+      confirmPassword: "weak",
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("should require token in reset payload", () => {
+    const result = resetPasswordSchema.safeParse({
+      token: "",
+      newPassword: "NewPassword123",
+      confirmPassword: "NewPassword123",
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.errors.at(0)?.message).toContain("Reset token is required");
+    }
+  });
+
+  it("should accept submit payload without confirm password", () => {
+    const result = resetPasswordSubmitSchema.safeParse({
+      token: "valid-token",
+      newPassword: "NewPassword123",
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("should reject submit payload missing token", () => {
+    const result = resetPasswordSubmitSchema.safeParse({
+      token: "",
+      newPassword: "NewPassword123",
+    });
+
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("password reset response schemas", () => {
+  it("should accept valid reset request response", () => {
+    const result = requestPasswordResetResponseSchema.safeParse({
+      success: true,
+      message: "If this email exists in our system, check your email for the reset link",
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("should accept valid reset submit response", () => {
+    const result = resetPasswordResponseSchema.safeParse({
+      success: true,
+      message: "Password reset successful. Please sign in with your new password.",
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("should reject malformed reset responses", () => {
+    const requestResult = requestPasswordResetResponseSchema.safeParse({
+      success: true,
+    });
+    const submitResult = resetPasswordResponseSchema.safeParse({
+      message: "ok",
+    });
+
+    expect(requestResult.success).toBe(false);
+    expect(submitResult.success).toBe(false);
   });
 });

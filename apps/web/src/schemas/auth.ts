@@ -56,6 +56,43 @@ export type LoginInput = z.infer<typeof loginSchema>;
 export type LoginFormInput = z.input<typeof loginSchema>;
 
 /**
+ * Password reset request input validation schema
+ */
+export const requestPasswordResetSchema = z.object({
+  email: z
+    .string()
+    .min(1, "Email is required")
+    .email("Please enter a valid email address"),
+});
+
+export type RequestPasswordResetInput = z.infer<typeof requestPasswordResetSchema>;
+
+/**
+ * Password reset input validation schema (UI/shared)
+ */
+const resetPasswordFieldsSchema = z.object({
+  token: z.string().min(1, "Reset token is required"),
+  newPassword: passwordSchema,
+  confirmPassword: z.string().min(1, "Please confirm your password"),
+});
+
+export const resetPasswordSchema = resetPasswordFieldsSchema.refine(
+  (data) => data.newPassword === data.confirmPassword,
+  {
+    message: "Passwords do not match",
+    path: ["confirmPassword"],
+  }
+);
+
+export const resetPasswordSubmitSchema = resetPasswordFieldsSchema.pick({
+  token: true,
+  newPassword: true,
+});
+
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+export type ResetPasswordSubmitInput = z.infer<typeof resetPasswordSubmitSchema>;
+
+/**
  * Sign-up API response schema
  */
 export const signUpResponseSchema = z.object({
@@ -101,3 +138,25 @@ export const loginResponseSchema = z.object({
 });
 
 export type LoginResponse = z.infer<typeof loginResponseSchema>;
+
+/**
+ * Password reset request API response schema
+ */
+export const requestPasswordResetResponseSchema = z.object({
+  success: z.boolean(),
+  message: z.string(),
+});
+
+export type RequestPasswordResetResponse = z.infer<
+  typeof requestPasswordResetResponseSchema
+>;
+
+/**
+ * Password reset submit API response schema
+ */
+export const resetPasswordResponseSchema = z.object({
+  success: z.boolean(),
+  message: z.string(),
+});
+
+export type ResetPasswordResponse = z.infer<typeof resetPasswordResponseSchema>;
