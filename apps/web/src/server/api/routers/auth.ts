@@ -1,14 +1,75 @@
 import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
 
-import { signUpSchema, signUpResponseSchema } from "~/schemas/auth";
+import {
+  loginResponseSchema,
+  loginSchema,
+  signUpResponseSchema,
+  signUpSchema,
+} from "~/schemas/auth";
 import { createTRPCRouter, protectedProcedure, publicProcedure } from "~/server/api/trpc";
 import { auth } from "~/server/better-auth";
-import { buildSessionCookie, extractSessionToken } from "~/server/better-auth/session-cookie";
+import {
+  buildClearSessionCookie,
+  buildSessionCookie,
+  extractSessionToken,
+} from "~/server/better-auth/session-cookie";
 import { setTenantContext } from "~/server/db/rls";
-import { tenantMemberships, tenants, user } from "~/server/db/schema";
+import { session, tenantMemberships, tenants, user } from "~/server/db/schema";
 import { logger } from "~/server/logger";
 import { getClientIp, rateLimit } from "~/server/rate-limit";
+
+const DEFAULT_SESSION_TTL_SECONDS = 60 * 30;
+const REMEMBER_ME_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
+const GENERIC_LOGIN_ERROR = "Invalid email or password";
+
+function splitCombinedSetCookie(setCookieHeader: string): string[] {
+  return setCookieHeader
+    .split(/,(?=\s*[^;,\s]+=)/g)
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+}
+
+function getSessionTokenFromSetCookie(setCookie: string): string | null {
+  const match = setCookie.match(/__session=([^;]+)/i);
+  if (!match?.[1]) {
+    return null;
+  }
+
+  return decodeURIComponent(match[1]);
+}
+
+function getSessionTokenFromCookieHeader(cookieHeader: string | null): string | null {
+  if (!cookieHeader) {
+    return null;
+  }
+
+  const match = cookieHeader.match(/(?:^|;\s*)__session=([^;]+)/i);
+  if (!match?.[1]) {
+    return null;
+  }
+
+  return decodeURIComponent(match[1]);
+}
+
+function extractSetCookieHeaders(result: unknown): string[] {
+  if (!result || typeof result !== "object" || !("headers" in result)) {
+    return [];
+  }
+
+  const headers = (result as { headers?: Headers }).headers;
+  if (!(headers instanceof Headers)) {
+    return [];
+  }
+
+  const withGetSetCookie = headers as Headers & { getSetCookie?: () => string[] };
+  if (typeof withGetSetCookie.getSetCookie === "function") {
+    return withGetSetCookie.getSetCookie().filter((value) => value.length > 0);
+  }
+
+  const single = headers.get("set-cookie");
+  return single ? splitCombinedSetCookie(single) : [];
+}
 
 export const authRouter = createTRPCRouter({
   /**
@@ -180,6 +241,213 @@ export const authRouter = createTRPCRouter({
         });
       }
     }),
+
+  /**
+   * Sign in with email and password.
+   * Default session is short-lived; remember-me extends session and uses
+   * persistent cookie.
+   */
+  login: publicProcedure
+    .input(loginSchema)
+    .output(loginResponseSchema)
+    .mutation(async ({ input, ctx }) => {
+      const { email, password, rememberMe } = input;
+      const clientIp = getClientIp(ctx.headers);
+
+      const rateKey = `login:${clientIp}`;
+      const rateResult = rateLimit(rateKey, { limit: 5, windowMs: 60_000 });
+      if (!rateResult.allowed) {
+        logger.warn({ event: "audit.auth.login.rate_limited", clientIp }, "Login rate limit exceeded");
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: "Too many login attempts. Please try again later.",
+        });
+      }
+
+      try {
+        const betterAuthResult = await auth.api.signInEmail({
+          body: {
+            email,
+            password,
+            callbackURL: "/dashboard",
+            rememberMe,
+          },
+          headers: ctx.headers,
+          returnHeaders: true,
+        });
+
+        const signInResponse = betterAuthResult.response;
+
+        if (!signInResponse?.user?.id) {
+          throw new TRPCError({ code: "UNAUTHORIZED", message: GENERIC_LOGIN_ERROR });
+        }
+
+        const dbSessionToken = signInResponse.token;
+
+        if (!dbSessionToken) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Failed to establish session after login.",
+          });
+        }
+
+        const sessionTtl = rememberMe ? REMEMBER_ME_SESSION_TTL_SECONDS : DEFAULT_SESSION_TTL_SECONDS;
+        const sessionExpiresAt = new Date(Date.now() + sessionTtl * 1000);
+
+        if (rememberMe) {
+          await ctx.db
+            .update(session)
+            .set({
+              expiresAt: sessionExpiresAt,
+              updatedAt: new Date(),
+            })
+            .where(eq(session.userId, signInResponse.user.id));
+        }
+
+        const userRecord = await ctx.db.query.user.findFirst({
+          columns: {
+            id: true,
+            email: true,
+            name: true,
+            defaultTenantId: true,
+          },
+          where: eq(user.id, signInResponse.user.id),
+        });
+
+        if (!userRecord?.defaultTenantId) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Tenant context is required for this account.",
+          });
+        }
+
+        const setCookieHeaders = extractSetCookieHeaders(betterAuthResult);
+        const cookieSessionToken =
+          setCookieHeaders
+            .map((headerValue) => getSessionTokenFromSetCookie(headerValue))
+            .find((value): value is string => Boolean(value)) ?? null;
+
+        if (setCookieHeaders.length > 0) {
+          for (const headerValue of setCookieHeaders) {
+            ctx.responseHeaders.append("Set-Cookie", headerValue);
+          }
+        } else {
+          ctx.responseHeaders.append(
+            "Set-Cookie",
+            buildSessionCookie({
+              token: dbSessionToken,
+              expiresAt: sessionExpiresAt,
+              persistent: false,
+            })
+          );
+        }
+
+        const persistentCookieToken = cookieSessionToken ?? dbSessionToken;
+
+        if (rememberMe) {
+          ctx.responseHeaders.append(
+            "Set-Cookie",
+            buildSessionCookie({
+              token: persistentCookieToken,
+              expiresAt: sessionExpiresAt,
+              persistent: true,
+            })
+          );
+        }
+
+        logger.info(
+          {
+            event: "audit.auth.login.success",
+            userId: userRecord.id,
+            tenantId: userRecord.defaultTenantId,
+            rememberMe,
+            clientIp,
+          },
+          "User login succeeded"
+        );
+
+        return {
+          success: true,
+          message: "Login successful",
+          user: {
+            id: userRecord.id,
+            email: userRecord.email,
+            name: userRecord.name,
+          },
+        };
+      } catch (error) {
+        if (error instanceof TRPCError && error.code !== "UNAUTHORIZED") {
+          throw error;
+        }
+
+        logger.warn(
+          {
+            event: "audit.auth.login.failed",
+            clientIp,
+            reason: error instanceof Error ? error.message : "unknown",
+          },
+          "User login failed"
+        );
+
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: GENERIC_LOGIN_ERROR,
+        });
+      }
+    }),
+
+  /**
+   * Sign out and clear auth cookie.
+   */
+  logout: publicProcedure.mutation(async ({ ctx }) => {
+    const currentSession = await auth.api.getSession({ headers: ctx.headers });
+    const currentToken = getSessionTokenFromCookieHeader(ctx.headers.get("cookie"));
+    const sessionRecord = currentToken
+      ? await ctx.db.query.session.findFirst({
+          columns: { userId: true },
+          where: eq(session.token, currentToken),
+        })
+      : null;
+    const logoutUserId = currentSession?.user?.id ?? sessionRecord?.userId ?? null;
+
+    try {
+      await auth.api.signOut({
+        headers: ctx.headers,
+      });
+
+      if (currentToken) {
+        await ctx.db.delete(session).where(eq(session.token, currentToken));
+      }
+    } catch (error) {
+      logger.warn(
+        {
+          event: "audit.auth.logout.failed",
+          userId: logoutUserId,
+          reason: error instanceof Error ? error.message : "unknown",
+        },
+        "User logout failed"
+      );
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Failed to log out",
+      });
+    }
+
+    ctx.responseHeaders.append("Set-Cookie", buildClearSessionCookie());
+
+    logger.info(
+      {
+        event: "audit.auth.logout.success",
+        userId: logoutUserId,
+      },
+      "User logged out"
+    );
+
+    return {
+      success: true,
+      message: "Logged out successfully",
+    };
+  }),
 
   /**
    * Get the current authenticated user's tenant memberships
