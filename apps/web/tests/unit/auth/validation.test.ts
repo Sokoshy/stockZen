@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { signUpSchema, passwordSchema } from "~/schemas/auth";
+import { loginSchema, passwordSchema, signUpSchema } from "~/schemas/auth";
 
 describe("passwordSchema", () => {
   it("should accept valid passwords", () => {
@@ -20,7 +20,7 @@ describe("passwordSchema", () => {
     const result = passwordSchema.safeParse("Pass1");
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.error.errors[0].message).toContain(
+      expect(result.error.errors.at(0)?.message).toContain(
         "at least 8 characters"
       );
     }
@@ -30,7 +30,7 @@ describe("passwordSchema", () => {
     const result = passwordSchema.safeParse("password123");
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.error.errors[0].message).toContain(
+      expect(result.error.errors.at(0)?.message).toContain(
         "uppercase letter"
       );
     }
@@ -40,7 +40,7 @@ describe("passwordSchema", () => {
     const result = passwordSchema.safeParse("PASSWORD123");
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.error.errors[0].message).toContain(
+      expect(result.error.errors.at(0)?.message).toContain(
         "lowercase letter"
       );
     }
@@ -50,7 +50,7 @@ describe("passwordSchema", () => {
     const result = passwordSchema.safeParse("PasswordABC");
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.error.errors[0].message).toContain("number");
+      expect(result.error.errors.at(0)?.message).toContain("number");
     }
   });
 
@@ -59,7 +59,7 @@ describe("passwordSchema", () => {
     const result = passwordSchema.safeParse(longPassword);
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.error.errors[0].message).toContain(
+      expect(result.error.errors.at(0)?.message).toContain(
         "at most 128 characters"
       );
     }
@@ -108,7 +108,7 @@ describe("signUpSchema", () => {
 
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.error.errors[0].message).toContain("do not match");
+      expect(result.error.errors.at(0)?.message).toContain("do not match");
     }
   });
 
@@ -140,6 +140,50 @@ describe("signUpSchema", () => {
       password: "weak",
       confirmPassword: "weak",
       tenantName: "Acme Inc.",
+    });
+
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("loginSchema", () => {
+  it("should accept valid login data with rememberMe", () => {
+    const result = loginSchema.safeParse({
+      email: "test@example.com",
+      password: "Password123",
+      rememberMe: true,
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("should default rememberMe to false", () => {
+    const result = loginSchema.safeParse({
+      email: "test@example.com",
+      password: "Password123",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.rememberMe).toBe(false);
+    }
+  });
+
+  it("should reject invalid login email", () => {
+    const result = loginSchema.safeParse({
+      email: "invalid-email",
+      password: "Password123",
+      rememberMe: false,
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("should require login password", () => {
+    const result = loginSchema.safeParse({
+      email: "test@example.com",
+      password: "",
+      rememberMe: false,
     });
 
     expect(result.success).toBe(false);

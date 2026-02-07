@@ -41,6 +41,21 @@ export const signUpSchema = z
 export type SignUpInput = z.infer<typeof signUpSchema>;
 
 /**
+ * Login input validation schema
+ */
+export const loginSchema = z.object({
+  email: z
+    .string()
+    .min(1, "Email is required")
+    .email("Please enter a valid email address"),
+  password: z.string().min(1, "Password is required"),
+  rememberMe: z.boolean().default(false),
+});
+
+export type LoginInput = z.infer<typeof loginSchema>;
+export type LoginFormInput = z.input<typeof loginSchema>;
+
+/**
  * Sign-up API response schema
  */
 export const signUpResponseSchema = z.object({
@@ -69,3 +84,20 @@ export const signUpResponseSchema = z.object({
 });
 
 export type SignUpResponse = z.infer<typeof signUpResponseSchema>;
+
+/**
+ * Login API response schema
+ */
+export const loginResponseSchema = z.object({
+  success: z.boolean(),
+  message: z.string(),
+  user: z
+    .object({
+      id: z.string(),
+      email: z.string(),
+      name: z.string(),
+    })
+    .optional(),
+});
+
+export type LoginResponse = z.infer<typeof loginResponseSchema>;
