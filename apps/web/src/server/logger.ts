@@ -9,4 +9,16 @@ export const logger = pino({
   base: {
     service: "web",
   },
+  redact: {
+    paths: [
+      "password",
+      "*.password",
+      "token",
+      "*.token",
+      "headers.authorization",
+      "req.headers.authorization",
+      "authorization",
+    ],
+    censor: "[REDACTED]",
+  },
 });

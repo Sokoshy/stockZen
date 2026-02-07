@@ -6,6 +6,7 @@ const DEFAULT_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
 type SessionCookieInput = {
   token: string;
   expiresAt?: Date | string | null;
+  persistent?: boolean;
 };
 
 function normalizeExpiresAt(expiresAt?: Date | string | null): Date | null {
@@ -46,7 +47,39 @@ function buildCookieParts(name: string, value: string, expiresAt?: Date | null):
 }
 
 export function buildSessionCookie(input: SessionCookieInput): string {
-  return buildCookieParts(SESSION_COOKIE_NAME, input.token, input.expiresAt);
+  const normalizedExpiresAt = normalizeExpiresAt(input.expiresAt);
+
+  if (input.persistent) {
+    return buildCookieParts(SESSION_COOKIE_NAME, input.token, normalizedExpiresAt);
+  }
+
+  const parts = [`${SESSION_COOKIE_NAME}=${encodeURIComponent(input.token)}`];
+  const secure = env.NODE_ENV === "production";
+
+  parts.push("Path=/");
+  parts.push("HttpOnly");
+  parts.push("SameSite=Lax");
+  if (secure) {
+    parts.push("Secure");
+  }
+
+  return parts.join("; ");
+}
+
+export function buildClearSessionCookie(): string {
+  const parts = [`${SESSION_COOKIE_NAME}=`];
+  const secure = env.NODE_ENV === "production";
+
+  parts.push("Max-Age=0");
+  parts.push("Expires=Thu, 01 Jan 1970 00:00:00 GMT");
+  parts.push("Path=/");
+  parts.push("HttpOnly");
+  parts.push("SameSite=Lax");
+  if (secure) {
+    parts.push("Secure");
+  }
+
+  return parts.join("; ");
 }
 
 export function extractSessionToken(result: unknown): {

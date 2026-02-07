@@ -24,21 +24,20 @@ export const auth = betterAuth({
   },
   advanced: {
     cookies: {
-      sessionToken: {
+      session_token: {
         name: "__session",
-        options: {
+        attributes: {
           httpOnly: true,
           secure: env.NODE_ENV === "production",
           sameSite: "lax",
           path: "/",
-          maxAge: 60 * 60 * 24 * 7, // 7 days
         },
       },
     },
   },
   session: {
-    expiresIn: 60 * 60 * 24 * 7, // 7 days
-    updateAge: 60 * 60 * 24, // 1 day - refresh session if older than this
+    expiresIn: 60 * 30, // 30 minutes (default short session)
+    updateAge: 60 * 5, // 5 minutes - refresh session if older than this
   },
   user: {
     additionalFields: {
