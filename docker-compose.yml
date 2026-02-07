@@ -2,7 +2,7 @@ services:
   postgres:
     image: postgres:18-alpine
     container_name: stockzen-postgres
-    restart: unless-stopped
+    restart: no
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     environment:
