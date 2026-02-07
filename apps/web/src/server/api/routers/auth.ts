@@ -4,16 +4,27 @@ import { eq } from "drizzle-orm";
 import {
   loginResponseSchema,
   loginSchema,
+  requestPasswordResetResponseSchema,
+  requestPasswordResetSchema,
+  resetPasswordResponseSchema,
+  resetPasswordSubmitSchema,
   signUpResponseSchema,
   signUpSchema,
 } from "~/schemas/auth";
 import { createTRPCRouter, protectedProcedure, publicProcedure } from "~/server/api/trpc";
 import { auth } from "~/server/better-auth";
 import {
+  getTrustedPasswordResetRedirectUrl,
+} from "~/server/better-auth/password-reset-email";
+import {
   buildClearSessionCookie,
   buildSessionCookie,
   extractSessionToken,
 } from "~/server/better-auth/session-cookie";
+import {
+  extractErrorMessage,
+  isInvalidResetTokenError,
+} from "~/server/better-auth/password-reset-errors";
 import { setTenantContext } from "~/server/db/rls";
 import { session, tenantMemberships, tenants, user } from "~/server/db/schema";
 import { logger } from "~/server/logger";
@@ -22,6 +33,20 @@ import { getClientIp, rateLimit } from "~/server/rate-limit";
 const DEFAULT_SESSION_TTL_SECONDS = 60 * 30;
 const REMEMBER_ME_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 const GENERIC_LOGIN_ERROR = "Invalid email or password";
+const GENERIC_PASSWORD_RESET_REQUEST_RESPONSE =
+  "If this email exists in our system, check your email for the reset link";
+const GENERIC_PASSWORD_RESET_TOKEN_ERROR =
+  "This reset link is invalid or has expired. Please request a new reset link.";
+const PASSWORD_RESET_SUCCESS_MESSAGE =
+  "Password reset successful. Please sign in with your new password.";
+const PASSWORD_RESET_REQUEST_RATE_LIMIT = {
+  limit: 3,
+  windowMs: 15 * 60 * 1000,
+} as const;
+const PASSWORD_RESET_SUBMIT_RATE_LIMIT = {
+  limit: 5,
+  windowMs: 15 * 60 * 1000,
+} as const;
 
 function splitCombinedSetCookie(setCookieHeader: string): string[] {
   return setCookieHeader
@@ -394,6 +419,141 @@ export const authRouter = createTRPCRouter({
           message: GENERIC_LOGIN_ERROR,
         });
       }
+    }),
+
+  /**
+   * Request password reset and always return a generic success response.
+   */
+  requestPasswordReset: publicProcedure
+    .input(requestPasswordResetSchema)
+    .output(requestPasswordResetResponseSchema)
+    .mutation(async ({ input, ctx }) => {
+      const clientIp = getClientIp(ctx.headers);
+
+      const rateKey = `password-reset-request:${clientIp}`;
+      const rateResult = rateLimit(rateKey, PASSWORD_RESET_REQUEST_RATE_LIMIT);
+      if (!rateResult.allowed) {
+        logger.warn(
+          {
+            event: "audit.auth.password_reset.request.rate_limited",
+            clientIp,
+          },
+          "Password reset request rate limit exceeded"
+        );
+
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: "Too many password reset requests. Please try again later.",
+        });
+      }
+
+      try {
+        await auth.api.requestPasswordReset({
+          body: {
+            email: input.email,
+            redirectTo: getTrustedPasswordResetRedirectUrl(),
+          },
+          headers: ctx.headers,
+        });
+      } catch (error) {
+        logger.error(
+          {
+            event: "audit.auth.password_reset.request.failed",
+            clientIp,
+            reason: extractErrorMessage(error),
+          },
+          "Password reset request failed"
+        );
+
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Unable to process password reset right now. Please try again.",
+        });
+      }
+
+      logger.info(
+        {
+          event: "audit.auth.password_reset.request.accepted",
+          clientIp,
+        },
+        "Password reset request accepted"
+      );
+
+      return {
+        success: true,
+        message: GENERIC_PASSWORD_RESET_REQUEST_RESPONSE,
+      };
+    }),
+
+  /**
+   * Reset password using one-time token.
+   */
+  resetPassword: publicProcedure
+    .input(resetPasswordSubmitSchema)
+    .output(resetPasswordResponseSchema)
+    .mutation(async ({ input, ctx }) => {
+      const clientIp = getClientIp(ctx.headers);
+
+      const rateKey = `password-reset-submit:${clientIp}`;
+      const rateResult = rateLimit(rateKey, PASSWORD_RESET_SUBMIT_RATE_LIMIT);
+      if (!rateResult.allowed) {
+        logger.warn(
+          {
+            event: "audit.auth.password_reset.submit.rate_limited",
+            clientIp,
+          },
+          "Password reset submit rate limit exceeded"
+        );
+
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: "Too many password reset attempts. Please try again later.",
+        });
+      }
+
+      try {
+        await auth.api.resetPassword({
+          body: {
+            token: input.token,
+            newPassword: input.newPassword,
+          },
+          headers: ctx.headers,
+        });
+      } catch (error) {
+        if (isInvalidResetTokenError(error)) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: GENERIC_PASSWORD_RESET_TOKEN_ERROR,
+          });
+        }
+
+        logger.error(
+          {
+            event: "audit.auth.password_reset.submit.failed",
+            clientIp,
+            reason: extractErrorMessage(error),
+          },
+          "Password reset submit failed"
+        );
+
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Unable to reset password right now. Please try again.",
+        });
+      }
+
+      logger.info(
+        {
+          event: "audit.auth.password_reset.submit.success",
+          clientIp,
+        },
+        "Password reset submit succeeded"
+      );
+
+      return {
+        success: true,
+        message: PASSWORD_RESET_SUCCESS_MESSAGE,
+      };
     }),
 
   /**
