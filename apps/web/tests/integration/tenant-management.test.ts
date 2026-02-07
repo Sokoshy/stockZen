@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq, sql } from "drizzle-orm";
 
@@ -49,6 +51,9 @@ describe("Tenant Management", () => {
         .returning();
 
       expect(tenant).toBeDefined();
+      if (!tenant) {
+        throw new Error("Expected tenant to be created");
+      }
       expect(tenant.name).toBe(tenantName);
       expect(tenant.id).toBeDefined();
       expect(tenant.createdAt).toBeInstanceOf(Date);
@@ -129,7 +134,7 @@ describe("Tenant Management", () => {
 
       expect(policies.length).toBeGreaterThanOrEqual(4); // select, insert, update, delete
 
-      const policyNames = policies.map((p: { policyname: string }) => p.policyname);
+      const policyNames = policies.map((p) => String((p as { policyname: string }).policyname));
       expect(policyNames).toContain("tenant_isolation_select");
       expect(policyNames).toContain("tenant_isolation_insert");
       expect(policyNames).toContain("tenant_isolation_update");
@@ -162,6 +167,10 @@ describe("Tenant Management", () => {
           },
         ])
         .returning();
+
+      if (!tenantA || !tenantB || !userA || !userB) {
+        throw new Error("Expected test fixtures to be created");
+      }
 
       await testDb.insert(tenantMemberships).values([
         { tenantId: tenantA.id, userId: userA.id, role: "Admin" },
