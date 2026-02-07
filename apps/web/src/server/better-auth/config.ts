@@ -3,6 +3,9 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 
 import { env } from "~/lib/env";
 import { db } from "~/server/db";
+import { logger } from "~/server/logger";
+
+import { queuePasswordResetEmail } from "./password-reset-email";
 
 export const auth = betterAuth({
   baseURL: env.BETTER_AUTH_BASE_URL,
@@ -14,6 +17,32 @@ export const auth = betterAuth({
     enabled: true,
     minPasswordLength: 8,
     maxPasswordLength: 128,
+    resetPasswordTokenExpiresIn: 60 * 15,
+    revokeSessionsOnPasswordReset: true,
+    sendResetPassword: async ({ user, token }) => {
+      queuePasswordResetEmail({
+        userId: user.id,
+        email: user.email,
+        token,
+      });
+
+      logger.info(
+        {
+          event: "audit.auth.password_reset.email_queued",
+          userId: user.id,
+        },
+        "Password reset email queued"
+      );
+    },
+    onPasswordReset: async ({ user }) => {
+      logger.info(
+        {
+          event: "audit.auth.password_reset.success",
+          userId: user.id,
+        },
+        "Password reset completed"
+      );
+    },
   },
   socialProviders: {
     github: {
