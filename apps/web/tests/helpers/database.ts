@@ -17,14 +17,29 @@ export function createTestDb() {
 // Clean up tables before/after tests
 export async function cleanDatabase(db: ReturnType<typeof createTestDb>) {
   const client = await db.$client;
-  
-  // Delete in order to respect foreign key constraints
-  await client`DELETE FROM "tenant_memberships"`;
-  await client`DELETE FROM "tenants"`;
-  await client`DELETE FROM "session"`;
-  await client`DELETE FROM "account"`;
-  await client`DELETE FROM "verification"`;
-  await client`DELETE FROM "user"`;
+
+  const tablesInDeleteOrder = [
+    "tenant_invitations",
+    "tenant_memberships",
+    "tenants",
+    "session",
+    "account",
+    "verification",
+    "user",
+  ];
+
+  // Delete in order to respect foreign key constraints.
+  // Some local test databases may not yet have newer tables.
+  for (const tableName of tablesInDeleteOrder) {
+    try {
+      await client.unsafe(`DELETE FROM "${tableName}"`);
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+      if (code !== "42P01") {
+        throw error;
+      }
+    }
+  }
 }
 
 // Generate unique test data
