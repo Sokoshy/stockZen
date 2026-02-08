@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, lt, sql } from "drizzle-orm";
 
 import {
   loginResponseSchema,
@@ -18,6 +18,17 @@ import {
   updateTenantMemberRoleInputSchema,
   updateTenantMemberRoleOutputSchema,
 } from "~/schemas/team-membership";
+import {
+  acceptInvitationInputSchema,
+  acceptInvitationResponseSchema,
+  createInvitationInputSchema,
+  createInvitationResponseSchema,
+  listInvitationsOutputSchema,
+  previewInvitationInputSchema,
+  previewInvitationResponseSchema,
+  revokeInvitationInputSchema,
+  revokeInvitationResponseSchema,
+} from "~/schemas/tenant-invitations";
 import { createTRPCRouter, protectedProcedure, publicProcedure } from "~/server/api/trpc";
 import {
   canManageTenantMembers,
@@ -31,6 +42,9 @@ import {
   getTrustedPasswordResetRedirectUrl,
 } from "~/server/better-auth/password-reset-email";
 import {
+  queueInvitationEmail,
+} from "~/server/better-auth/invitation-email";
+import {
   buildClearSessionCookie,
   buildSessionCookie,
   extractSessionToken,
@@ -40,8 +54,8 @@ import {
   isInvalidResetTokenError,
 } from "~/server/better-auth/password-reset-errors";
 import { db as rootDb } from "~/server/db";
-import { setTenantContext } from "~/server/db/rls";
-import { session, tenantMemberships, tenants, user } from "~/server/db/schema";
+import { setInvitationTokenContext, setTenantContext } from "~/server/db/rls";
+import { session, tenantInvitations, tenantMemberships, tenants, user } from "~/server/db/schema";
 import { logger } from "~/server/logger";
 import { getClientIp, rateLimit } from "~/server/rate-limit";
 
@@ -182,6 +196,15 @@ function assertTenantHasAdminOrThrow(adminCount: number) {
       message: "Tenant must always retain at least one Admin.",
     });
   }
+}
+
+function isUniqueConstraintViolation(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const errorWithCode = error as { code?: string };
+  return errorWithCode.code === "23505";
 }
 
 export const authRouter = createTRPCRouter({
@@ -1111,4 +1134,671 @@ export const authRouter = createTRPCRouter({
       role: m.role,
     }));
   }),
+
+  /**
+   * List all pending invitations in current tenant.
+   * Admin-only.
+   */
+  listInvitations: protectedProcedure
+    .output(listInvitationsOutputSchema)
+    .query(async ({ ctx }) => {
+      const tenantId = assertTenantId(ctx.tenantId);
+      const actorMembership = await getCurrentTenantMembershipOrThrow({
+        tenantId,
+        userId: ctx.session.user.id,
+        db: ctx.db,
+      });
+
+      if (!canManageTenantMembers(actorMembership.role)) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only Admins can view invitations.",
+        });
+      }
+
+      const invitations = await ctx.db.query.tenantInvitations.findMany({
+        where: eq(tenantInvitations.tenantId, tenantId),
+        orderBy: (invitations, { desc }) => [desc(invitations.createdAt)],
+      });
+
+      return {
+        invitations: invitations.map((inv) => ({
+          id: inv.id,
+          tenantId: inv.tenantId,
+          email: inv.email,
+          role: inv.role,
+          invitedByUserId: inv.invitedByUserId,
+          expiresAt: inv.expiresAt.toISOString(),
+          revokedAt: inv.revokedAt?.toISOString(),
+          usedAt: inv.usedAt?.toISOString(),
+          createdAt: inv.createdAt.toISOString(),
+        })),
+      };
+    }),
+
+  /**
+   * Create a new invitation to join the tenant.
+   * Admin-only.
+   */
+  createInvitation: protectedProcedure
+    .input(createInvitationInputSchema)
+    .output(createInvitationResponseSchema)
+    .mutation(async ({ ctx, input }) => {
+      const tenantId = assertTenantId(ctx.tenantId);
+      const actorMembership = await getCurrentTenantMembershipOrThrow({
+        tenantId,
+        userId: ctx.session.user.id,
+        db: ctx.db,
+      });
+
+      if (!canManageTenantMembers(actorMembership.role)) {
+        logger.warn(
+          {
+            event: "audit.auth.invitation.create.forbidden",
+            actorUserId: ctx.session.user.id,
+            tenantId,
+            actorRole: actorMembership.role,
+            targetEmail: input.email,
+          },
+          "Forbidden invitation creation attempt"
+        );
+
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only Admins can create invitations.",
+        });
+      }
+
+      const normalizedEmail = input.email.trim().toLowerCase();
+
+      // Check if user is already a member
+      const existingMembership = await ctx.db
+        .select({ userId: tenantMemberships.userId })
+        .from(tenantMemberships)
+        .innerJoin(user, eq(tenantMemberships.userId, user.id))
+        .where(
+          and(
+            eq(tenantMemberships.tenantId, tenantId),
+            sql`lower(${user.email}) = ${normalizedEmail}`
+          )
+        )
+        .limit(1);
+
+      if (existingMembership.length > 0) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "This user is already a member of the tenant.",
+        });
+      }
+
+      // Revoke expired pending invitations for the same email so they no longer
+      // block a fresh invite.
+      await ctx.db
+        .update(tenantInvitations)
+        .set({ revokedAt: new Date() })
+        .where(
+          and(
+            eq(tenantInvitations.tenantId, tenantId),
+            sql`lower(${tenantInvitations.email}) = ${normalizedEmail}`,
+            isNull(tenantInvitations.revokedAt),
+            isNull(tenantInvitations.usedAt),
+            lt(tenantInvitations.expiresAt, new Date())
+          )
+        );
+
+      // Check for existing pending invitation
+      const existingInvitation = await ctx.db.query.tenantInvitations.findFirst({
+        where: and(
+          eq(tenantInvitations.tenantId, tenantId),
+          sql`lower(${tenantInvitations.email}) = ${normalizedEmail}`,
+          isNull(tenantInvitations.revokedAt),
+          isNull(tenantInvitations.usedAt)
+        ),
+      });
+
+      if (existingInvitation) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "An active invitation already exists for this email.",
+        });
+      }
+
+      // Generate secure random token
+      const token = crypto.randomUUID();
+      const tokenHash = await hashToken(token);
+
+      // Create invitation with 7-day expiration
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 7);
+
+      let invitation: typeof tenantInvitations.$inferSelect | undefined;
+      try {
+        [invitation] = await ctx.db
+          .insert(tenantInvitations)
+          .values({
+            tenantId,
+            email: normalizedEmail,
+            role: input.role,
+            tokenHash,
+            expiresAt,
+            invitedByUserId: ctx.session.user.id,
+          })
+          .returning();
+      } catch (error) {
+        if (isUniqueConstraintViolation(error)) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "An active invitation already exists for this email.",
+          });
+        }
+
+        throw error;
+      }
+
+      if (!invitation) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to create invitation.",
+        });
+      }
+
+      // Get tenant and inviter details for email
+      const tenant = await ctx.db.query.tenants.findFirst({
+        where: eq(tenants.id, tenantId),
+        columns: { name: true },
+      });
+
+      const invitedByUser = await ctx.db.query.user.findFirst({
+        where: eq(user.id, ctx.session.user.id),
+        columns: { name: true },
+      });
+
+      // Send invitation email
+      queueInvitationEmail({
+        invitationId: invitation.id,
+        email: normalizedEmail,
+        token,
+        tenantName: tenant?.name ?? "Your Organization",
+        invitedByName: invitedByUser?.name ?? "An Admin",
+        role: input.role,
+      });
+
+      logger.info(
+        {
+          event: "audit.auth.invitation.create.success",
+          actorUserId: ctx.session.user.id,
+          tenantId,
+          invitationId: invitation.id,
+          targetEmail: normalizedEmail,
+          targetRole: input.role,
+        },
+        "Invitation created and email queued"
+      );
+
+      return {
+        success: true,
+        message: "Invitation created successfully.",
+        invitation: {
+          id: invitation.id,
+          tenantId: invitation.tenantId,
+          email: invitation.email,
+          role: invitation.role,
+          invitedByUserId: invitation.invitedByUserId,
+          expiresAt: invitation.expiresAt.toISOString(),
+          revokedAt: invitation.revokedAt?.toISOString(),
+          usedAt: invitation.usedAt?.toISOString(),
+          createdAt: invitation.createdAt.toISOString(),
+        },
+      };
+    }),
+
+  /**
+   * Revoke a pending invitation.
+   * Admin-only.
+   */
+  revokeInvitation: protectedProcedure
+    .input(revokeInvitationInputSchema)
+    .output(revokeInvitationResponseSchema)
+    .mutation(async ({ ctx, input }) => {
+      const tenantId = assertTenantId(ctx.tenantId);
+      const actorMembership = await getCurrentTenantMembershipOrThrow({
+        tenantId,
+        userId: ctx.session.user.id,
+        db: ctx.db,
+      });
+
+      if (!canManageTenantMembers(actorMembership.role)) {
+        logger.warn(
+          {
+            event: "audit.auth.invitation.revoke.forbidden",
+            actorUserId: ctx.session.user.id,
+            tenantId,
+            actorRole: actorMembership.role,
+            invitationId: input.invitationId,
+          },
+          "Forbidden invitation revocation attempt"
+        );
+
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only Admins can revoke invitations.",
+        });
+      }
+
+      const invitation = await ctx.db.query.tenantInvitations.findFirst({
+        where: and(
+          eq(tenantInvitations.id, input.invitationId),
+          eq(tenantInvitations.tenantId, tenantId)
+        ),
+      });
+
+      if (!invitation) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Invitation not found.",
+        });
+      }
+
+      if (invitation.revokedAt) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "Invitation is already revoked.",
+        });
+      }
+
+      if (invitation.usedAt) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "Invitation has already been used.",
+        });
+      }
+
+      await ctx.db
+        .update(tenantInvitations)
+        .set({ revokedAt: new Date() })
+        .where(eq(tenantInvitations.id, input.invitationId));
+
+      logger.info(
+        {
+          event: "audit.auth.invitation.revoke.success",
+          actorUserId: ctx.session.user.id,
+          tenantId,
+          invitationId: input.invitationId,
+          targetEmail: invitation.email,
+        },
+        "Invitation revoked successfully"
+      );
+
+      return {
+        success: true,
+        message: "Invitation revoked successfully.",
+      };
+    }),
+
+  /**
+   * Preview/validate an invitation token.
+   * Public procedure - no authentication required.
+   */
+  previewInvitation: publicProcedure
+    .input(previewInvitationInputSchema)
+    .output(previewInvitationResponseSchema)
+    .query(async ({ ctx, input }) => {
+      const tokenHash = await hashToken(input.token);
+      const clientIp = getClientIp(ctx.headers);
+
+      return ctx.db.transaction(async (tx) => {
+        await setInvitationTokenContext(tokenHash, tx);
+
+        const invitation = await tx.query.tenantInvitations.findFirst({
+          where: eq(tenantInvitations.tokenHash, tokenHash),
+        });
+
+        if (!invitation) {
+          logger.warn(
+            {
+              event: "audit.auth.invitation.preview.rejected",
+              reason: "invalid_or_missing",
+              clientIp,
+            },
+            "Invitation preview rejected"
+          );
+          return {
+            valid: false,
+            state: "expired" as const,
+            message:
+              "This invitation link is invalid or has expired. Please request a new invitation from an Admin.",
+          };
+        }
+
+        if (invitation.usedAt) {
+          logger.info(
+            {
+              event: "audit.auth.invitation.preview.rejected",
+              reason: "used",
+              invitationId: invitation.id,
+              clientIp,
+            },
+            "Invitation preview rejected"
+          );
+          return {
+            valid: false,
+            state: "used" as const,
+            message:
+              "This invitation has already been used. Please request a new invitation from an Admin.",
+          };
+        }
+
+        if (invitation.revokedAt) {
+          logger.info(
+            {
+              event: "audit.auth.invitation.preview.rejected",
+              reason: "revoked",
+              invitationId: invitation.id,
+              clientIp,
+            },
+            "Invitation preview rejected"
+          );
+          return {
+            valid: false,
+            state: "revoked" as const,
+            message:
+              "This invitation has been revoked. Please request a new invitation from an Admin.",
+          };
+        }
+
+        if (invitation.expiresAt < new Date()) {
+          logger.info(
+            {
+              event: "audit.auth.invitation.preview.rejected",
+              reason: "expired",
+              invitationId: invitation.id,
+              clientIp,
+            },
+            "Invitation preview rejected"
+          );
+          return {
+            valid: false,
+            state: "expired" as const,
+            message:
+              "This invitation has expired. Please request a new invitation from an Admin.",
+          };
+        }
+
+        return {
+          valid: true,
+          state: "pending" as const,
+          email: invitation.email,
+          role: invitation.role,
+          expiresAt: invitation.expiresAt.toISOString(),
+          message: "Invitation is valid. Please set your password to join.",
+        };
+      });
+    }),
+
+  /**
+   * Accept an invitation and create user account.
+   * Public procedure - no authentication required.
+   */
+  acceptInvitation: publicProcedure
+    .input(acceptInvitationInputSchema)
+    .output(acceptInvitationResponseSchema)
+    .mutation(async ({ ctx, input }) => {
+      const tokenHash = await hashToken(input.token);
+      const clientIp = getClientIp(ctx.headers);
+      let createdUserId: string | null = null;
+      let result:
+        | {
+            userId: string;
+            tenantId: string;
+            isNewUser: boolean;
+          }
+        | undefined;
+
+      try {
+        result = await ctx.db.transaction(async (tx) => {
+          await setInvitationTokenContext(tokenHash, tx);
+
+          const invitation = await tx.query.tenantInvitations.findFirst({
+            where: eq(tenantInvitations.tokenHash, tokenHash),
+          });
+
+          if (!invitation) {
+            logger.warn(
+              {
+                event: "audit.auth.invitation.accept.rejected",
+                reason: "invalid_or_missing",
+                clientIp,
+              },
+              "Invitation accept rejected"
+            );
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message:
+                "This invitation link is invalid or has expired. Please request a new invitation from an Admin.",
+            });
+          }
+
+          if (invitation.usedAt) {
+            logger.info(
+              {
+                event: "audit.auth.invitation.accept.rejected",
+                reason: "used",
+                invitationId: invitation.id,
+                clientIp,
+              },
+              "Invitation accept rejected"
+            );
+            throw new TRPCError({
+              code: "CONFLICT",
+              message:
+                "This invitation has already been used. Please request a new invitation from an Admin.",
+            });
+          }
+
+          if (invitation.revokedAt) {
+            logger.info(
+              {
+                event: "audit.auth.invitation.accept.rejected",
+                reason: "revoked",
+                invitationId: invitation.id,
+                clientIp,
+              },
+              "Invitation accept rejected"
+            );
+            throw new TRPCError({
+              code: "CONFLICT",
+              message:
+                "This invitation has been revoked. Please request a new invitation from an Admin.",
+            });
+          }
+
+          if (invitation.expiresAt < new Date()) {
+            logger.info(
+              {
+                event: "audit.auth.invitation.accept.rejected",
+                reason: "expired",
+                invitationId: invitation.id,
+                clientIp,
+              },
+              "Invitation accept rejected"
+            );
+            throw new TRPCError({
+              code: "CONFLICT",
+              message:
+                "This invitation has expired. Please request a new invitation from an Admin.",
+            });
+          }
+
+          // Atomically consume token in this transaction before continuing. If
+          // another request consumed it first, no row is returned.
+          const consumedAt = new Date();
+          const [consumedInvitation] = await tx
+            .update(tenantInvitations)
+            .set({ usedAt: consumedAt })
+            .where(
+              and(
+                eq(tenantInvitations.id, invitation.id),
+                isNull(tenantInvitations.usedAt),
+                isNull(tenantInvitations.revokedAt),
+                gt(tenantInvitations.expiresAt, consumedAt)
+              )
+            )
+            .returning({
+              id: tenantInvitations.id,
+              tenantId: tenantInvitations.tenantId,
+              email: tenantInvitations.email,
+              role: tenantInvitations.role,
+            });
+
+          if (!consumedInvitation) {
+            logger.warn(
+              {
+                event: "audit.auth.invitation.accept.rejected",
+                reason: "already_consumed_or_invalid_state",
+                invitationId: invitation.id,
+                clientIp,
+              },
+              "Invitation accept rejected due to token race"
+            );
+            throw new TRPCError({
+              code: "CONFLICT",
+              message:
+                "This invitation has already been used. Please request a new invitation from an Admin.",
+            });
+          }
+
+          const existingUser = await tx.query.user.findFirst({
+            where: eq(user.email, consumedInvitation.email),
+          });
+
+          let userId: string;
+
+          if (existingUser) {
+            const existingMembership = await tx.query.tenantMemberships.findFirst({
+              where: and(
+                eq(tenantMemberships.tenantId, consumedInvitation.tenantId),
+                eq(tenantMemberships.userId, existingUser.id)
+              ),
+            });
+
+            if (existingMembership) {
+              logger.info(
+                {
+                  event: "audit.auth.invitation.accept.rejected",
+                  reason: "already_member",
+                  invitationId: consumedInvitation.id,
+                  tenantId: consumedInvitation.tenantId,
+                  userId: existingUser.id,
+                  clientIp,
+                },
+                "Invitation accept rejected"
+              );
+              throw new TRPCError({
+                code: "CONFLICT",
+                message: "You are already a member of this tenant.",
+              });
+            }
+
+            userId = existingUser.id;
+          } else {
+            const userName =
+              consumedInvitation.email.split("@")[0] ?? consumedInvitation.email;
+            const signUpResult = await auth.api.signUpEmail({
+              body: {
+                email: consumedInvitation.email,
+                password: input.password,
+                name: userName,
+                callbackURL: "/dashboard",
+              },
+              headers: ctx.headers,
+            });
+
+            if (!signUpResult?.user?.id) {
+              throw new TRPCError({
+                code: "INTERNAL_SERVER_ERROR",
+                message: "Failed to create user account.",
+              });
+            }
+
+            userId = signUpResult.user.id;
+            createdUserId = userId;
+          }
+
+          await setTenantContext(consumedInvitation.tenantId, tx);
+
+          await tx.insert(tenantMemberships).values({
+            tenantId: consumedInvitation.tenantId,
+            userId,
+            role: consumedInvitation.role,
+          });
+
+          await tx
+            .update(user)
+            .set({ defaultTenantId: consumedInvitation.tenantId })
+            .where(eq(user.id, userId));
+
+          return {
+            userId,
+            tenantId: consumedInvitation.tenantId,
+            isNewUser: !existingUser,
+          };
+        });
+      } catch (error) {
+        if (createdUserId) {
+          try {
+            await ctx.db.delete(user).where(eq(user.id, createdUserId));
+          } catch (cleanupError) {
+            logger.error(
+              {
+                event: "audit.auth.invitation.accept.cleanup.failed",
+                userId: createdUserId,
+                reason:
+                  cleanupError instanceof Error
+                    ? cleanupError.message
+                    : "unknown",
+              },
+              "Failed to clean up user after invitation accept failure"
+            );
+          }
+        }
+
+        throw error;
+      }
+
+      if (!result) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to accept invitation.",
+        });
+      }
+
+      logger.info(
+        {
+          event: "audit.auth.invitation.accept.success",
+          userId: result.userId,
+          tenantId: result.tenantId,
+          isNewUser: result.isNewUser,
+          clientIp,
+        },
+        "Invitation accepted successfully"
+      );
+
+      return {
+        success: true,
+        message: "Invitation accepted successfully. You can now sign in.",
+        redirectTo: "/login",
+      };
+    }),
 });
+
+/**
+ * Hash an invitation token using SHA-256
+ * This is a one-way hash for secure token storage
+ */
+async function hashToken(token: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(token);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+}

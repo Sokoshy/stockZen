@@ -13,6 +13,7 @@ export const env = createEnv({
     BETTER_AUTH_GITHUB_REDIRECT_URI: z.string().url(),
     BETTER_AUTH_BASE_URL: z.string().url(),
     PASSWORD_RESET_EMAIL_WEBHOOK_URL: z.string().url().optional(),
+    INVITATION_EMAIL_WEBHOOK_URL: z.string().url().optional(),
     DATABASE_URL: z.string().url(),
     NODE_ENV: z
       .enum(["development", "test", "production"])
@@ -40,6 +41,7 @@ export const env = createEnv({
       process.env.BETTER_AUTH_GITHUB_REDIRECT_URI,
     BETTER_AUTH_BASE_URL: process.env.BETTER_AUTH_BASE_URL,
     PASSWORD_RESET_EMAIL_WEBHOOK_URL: process.env.PASSWORD_RESET_EMAIL_WEBHOOK_URL,
+    INVITATION_EMAIL_WEBHOOK_URL: process.env.INVITATION_EMAIL_WEBHOOK_URL,
     DATABASE_URL: process.env.DATABASE_URL,
     NODE_ENV: process.env.NODE_ENV,
   },
