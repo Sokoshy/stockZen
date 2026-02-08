@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import {
   loginResponseSchema,
@@ -11,7 +11,21 @@ import {
   signUpResponseSchema,
   signUpSchema,
 } from "~/schemas/auth";
+import {
+  listTenantMembersOutputSchema,
+  removeTenantMemberInputSchema,
+  removeTenantMemberOutputSchema,
+  updateTenantMemberRoleInputSchema,
+  updateTenantMemberRoleOutputSchema,
+} from "~/schemas/team-membership";
 import { createTRPCRouter, protectedProcedure, publicProcedure } from "~/server/api/trpc";
+import {
+  canManageTenantMembers,
+  createSelfRemovalConfirmToken,
+  validateMemberRemovalPolicy,
+  validateRoleChangePolicy,
+  verifySelfRemovalConfirmToken,
+} from "~/server/auth/rbac-policy";
 import { auth } from "~/server/better-auth";
 import {
   getTrustedPasswordResetRedirectUrl,
@@ -25,6 +39,7 @@ import {
   extractErrorMessage,
   isInvalidResetTokenError,
 } from "~/server/better-auth/password-reset-errors";
+import { db as rootDb } from "~/server/db";
 import { setTenantContext } from "~/server/db/rls";
 import { session, tenantMemberships, tenants, user } from "~/server/db/schema";
 import { logger } from "~/server/logger";
@@ -94,6 +109,79 @@ function extractSetCookieHeaders(result: unknown): string[] {
 
   const single = headers.get("set-cookie");
   return single ? splitCombinedSetCookie(single) : [];
+}
+
+function assertTenantId(tenantId: string | null): string {
+  if (!tenantId) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Tenant context is required for this operation.",
+    });
+  }
+
+  return tenantId;
+}
+
+async function getCurrentTenantMembershipOrThrow(input: {
+  tenantId: string;
+  userId: string;
+  db: Pick<typeof rootDb, "query">;
+}) {
+  const membership = await input.db.query.tenantMemberships.findFirst({
+    columns: {
+      tenantId: true,
+      userId: true,
+      role: true,
+    },
+    where: and(
+      eq(tenantMemberships.tenantId, input.tenantId),
+      eq(tenantMemberships.userId, input.userId)
+    ),
+  });
+
+  if (!membership) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Active tenant membership is required for this operation.",
+    });
+  }
+
+  return membership;
+}
+
+async function countTenantAdmins(input: {
+  tenantId: string;
+  db: Pick<typeof rootDb, "query">;
+}) {
+  const adminMemberships = await input.db.query.tenantMemberships.findMany({
+    columns: {
+      userId: true,
+    },
+    where: and(eq(tenantMemberships.tenantId, input.tenantId), eq(tenantMemberships.role, "Admin")),
+  });
+
+  return adminMemberships.length;
+}
+
+async function lockTenantMembershipsForUpdate(input: {
+  tenantId: string;
+  db: Pick<typeof rootDb, "execute">;
+}) {
+  await input.db.execute(sql`
+    select ${tenantMemberships.id}
+    from ${tenantMemberships}
+    where ${tenantMemberships.tenantId} = ${input.tenantId}
+    for update
+  `);
+}
+
+function assertTenantHasAdminOrThrow(adminCount: number) {
+  if (adminCount < 1) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Tenant must always retain at least one Admin.",
+    });
+  }
 }
 
 export const authRouter = createTRPCRouter({
@@ -608,6 +696,403 @@ export const authRouter = createTRPCRouter({
       message: "Logged out successfully",
     };
   }),
+
+  /**
+   * List all members in current tenant.
+   */
+  listTenantMembers: protectedProcedure
+    .output(listTenantMembersOutputSchema)
+    .query(async ({ ctx }) => {
+      const tenantId = assertTenantId(ctx.tenantId);
+      const actorMembership = await getCurrentTenantMembershipOrThrow({
+        tenantId,
+        userId: ctx.session.user.id,
+        db: ctx.db,
+      });
+
+      const memberships = await ctx.db.query.tenantMemberships.findMany({
+        columns: {
+          userId: true,
+          role: true,
+          createdAt: true,
+        },
+        where: eq(tenantMemberships.tenantId, tenantId),
+        with: {
+          user: {
+            columns: {
+              id: true,
+              email: true,
+              name: true,
+            },
+          },
+        },
+      });
+
+      return {
+        actorRole: actorMembership.role,
+        members: memberships.map((membership) => ({
+          userId: membership.userId,
+          email: membership.user.email,
+          name: membership.user.name,
+          role: membership.role,
+          joinedAt: membership.createdAt.toISOString(),
+          isCurrentUser: membership.userId === ctx.session.user.id,
+        })),
+      };
+    }),
+
+  /**
+   * Update the role for a member in current tenant.
+   */
+  updateTenantMemberRole: protectedProcedure
+    .input(updateTenantMemberRoleInputSchema)
+    .output(updateTenantMemberRoleOutputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const tenantId = assertTenantId(ctx.tenantId);
+      const mutationResult = await ctx.db.transaction(async (tx) => {
+        await lockTenantMembershipsForUpdate({ tenantId, db: tx });
+
+        const actorMembership = await getCurrentTenantMembershipOrThrow({
+          tenantId,
+          userId: ctx.session.user.id,
+          db: tx,
+        });
+
+        if (!canManageTenantMembers(actorMembership.role)) {
+          logger.warn(
+            {
+              event: "audit.auth.team_member.role_update.forbidden",
+              actorUserId: ctx.session.user.id,
+              tenantId,
+              actorRole: actorMembership.role,
+              targetUserId: input.memberUserId,
+              targetRole: input.role,
+            },
+            "Forbidden role update attempt"
+          );
+
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Only Admins can change member roles.",
+          });
+        }
+
+        const targetMembership = await tx.query.tenantMemberships.findFirst({
+          columns: {
+            tenantId: true,
+            userId: true,
+            role: true,
+          },
+          where: and(
+            eq(tenantMemberships.tenantId, tenantId),
+            eq(tenantMemberships.userId, input.memberUserId)
+          ),
+        });
+
+        if (!targetMembership) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Member not found in this tenant.",
+          });
+        }
+
+        const adminCount = await countTenantAdmins({ tenantId, db: tx });
+        const policyResult = validateRoleChangePolicy({
+          actorUserId: ctx.session.user.id,
+          targetUserId: targetMembership.userId,
+          currentRole: targetMembership.role,
+          nextRole: input.role,
+          adminCount,
+        });
+
+        if (!policyResult.allowed) {
+          logger.warn(
+            {
+              event: "audit.auth.team_member.role_update.blocked",
+              actorUserId: ctx.session.user.id,
+              tenantId,
+              targetUserId: input.memberUserId,
+              currentRole: targetMembership.role,
+              requestedRole: input.role,
+              reason: policyResult.reason,
+            },
+            "Blocked role update request"
+          );
+
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: policyResult.reason ?? "Role transition is not allowed.",
+          });
+        }
+
+        if (targetMembership.role === input.role) {
+          return {
+            targetUserId: targetMembership.userId,
+            previousRole: targetMembership.role,
+            nextRole: input.role,
+            roleChanged: false,
+          };
+        }
+
+        await tx
+          .update(tenantMemberships)
+          .set({ role: input.role })
+          .where(
+            and(
+              eq(tenantMemberships.tenantId, tenantId),
+              eq(tenantMemberships.userId, targetMembership.userId)
+            )
+          );
+
+        const adminCountAfterUpdate = await countTenantAdmins({ tenantId, db: tx });
+        assertTenantHasAdminOrThrow(adminCountAfterUpdate);
+
+        return {
+          targetUserId: targetMembership.userId,
+          previousRole: targetMembership.role,
+          nextRole: input.role,
+          roleChanged: true,
+        };
+      });
+
+      if (mutationResult.roleChanged) {
+        logger.info(
+          {
+            event: "audit.auth.team_member.role_update.success",
+            actorUserId: ctx.session.user.id,
+            tenantId,
+            targetUserId: mutationResult.targetUserId,
+            previousRole: mutationResult.previousRole,
+            nextRole: mutationResult.nextRole,
+          },
+          "Member role updated"
+        );
+      }
+
+      return {
+        success: true,
+        message: "Member role updated successfully.",
+        memberUserId: mutationResult.targetUserId,
+        role: input.role,
+      };
+    }),
+
+  /**
+   * Remove a member from current tenant.
+   */
+  removeTenantMember: protectedProcedure
+    .input(removeTenantMemberInputSchema)
+    .output(removeTenantMemberOutputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const tenantId = assertTenantId(ctx.tenantId);
+      const actorMembership = await getCurrentTenantMembershipOrThrow({
+        tenantId,
+        userId: ctx.session.user.id,
+        db: ctx.db,
+      });
+
+      if (!canManageTenantMembers(actorMembership.role)) {
+        logger.warn(
+          {
+            event: "audit.auth.team_member.remove.forbidden",
+            actorUserId: ctx.session.user.id,
+            tenantId,
+            actorRole: actorMembership.role,
+            targetUserId: input.memberUserId,
+          },
+          "Forbidden member removal attempt"
+        );
+
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only Admins can remove members.",
+        });
+      }
+
+      const targetMembership = await ctx.db.query.tenantMemberships.findFirst({
+        columns: {
+          tenantId: true,
+          userId: true,
+          role: true,
+        },
+        where: and(
+          eq(tenantMemberships.tenantId, tenantId),
+          eq(tenantMemberships.userId, input.memberUserId)
+        ),
+      });
+
+      if (!targetMembership) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Member not found in this tenant.",
+        });
+      }
+
+      const adminCount = await countTenantAdmins({ tenantId, db: ctx.db });
+      const policyResult = validateMemberRemovalPolicy({
+        actorUserId: ctx.session.user.id,
+        targetUserId: targetMembership.userId,
+        targetRole: targetMembership.role,
+        adminCount,
+      });
+
+      if (!policyResult.allowed) {
+        logger.warn(
+          {
+            event: "audit.auth.team_member.remove.blocked",
+            actorUserId: ctx.session.user.id,
+            tenantId,
+            targetUserId: targetMembership.userId,
+            targetRole: targetMembership.role,
+            reason: policyResult.reason,
+          },
+          "Blocked member removal request"
+        );
+
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: policyResult.reason ?? "Member removal is not allowed.",
+        });
+      }
+
+      const isSelfRemoval = targetMembership.userId === ctx.session.user.id;
+
+      if (isSelfRemoval) {
+        const hasValidConfirmation =
+          input.confirmStep === 2 &&
+          typeof input.confirmToken === "string" &&
+          verifySelfRemovalConfirmToken({
+            token: input.confirmToken,
+            tenantId,
+            userId: targetMembership.userId,
+          });
+
+        if (!hasValidConfirmation) {
+          const confirmToken = createSelfRemovalConfirmToken({
+            tenantId,
+            userId: targetMembership.userId,
+          });
+
+          logger.info(
+            {
+              event: "audit.auth.team_member.self_removal.confirmation_requested",
+              actorUserId: ctx.session.user.id,
+              tenantId,
+            },
+            "Self-removal confirmation requested"
+          );
+
+          return {
+            success: false,
+            message: "Confirm self-removal one more time to continue.",
+            requiresSecondConfirmation: true,
+            confirmToken,
+            memberUserId: targetMembership.userId,
+          };
+        }
+      }
+
+      const removalResult = await ctx.db.transaction(async (tx) => {
+        await lockTenantMembershipsForUpdate({ tenantId, db: tx });
+
+        const targetMembershipInTx = await tx.query.tenantMemberships.findFirst({
+          columns: {
+            tenantId: true,
+            userId: true,
+            role: true,
+          },
+          where: and(
+            eq(tenantMemberships.tenantId, tenantId),
+            eq(tenantMemberships.userId, input.memberUserId)
+          ),
+        });
+
+        if (!targetMembershipInTx) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Member not found in this tenant.",
+          });
+        }
+
+        const adminCountInTx = await countTenantAdmins({ tenantId, db: tx });
+        const policyResultInTx = validateMemberRemovalPolicy({
+          actorUserId: ctx.session.user.id,
+          targetUserId: targetMembershipInTx.userId,
+          targetRole: targetMembershipInTx.role,
+          adminCount: adminCountInTx,
+        });
+
+        if (!policyResultInTx.allowed) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: policyResultInTx.reason ?? "Member removal is not allowed.",
+          });
+        }
+
+        await tx
+          .delete(tenantMemberships)
+          .where(
+            and(
+              eq(tenantMemberships.tenantId, tenantId),
+              eq(tenantMemberships.userId, targetMembershipInTx.userId)
+            )
+          );
+
+        const fallbackMembership = await tx.query.tenantMemberships.findFirst({
+          columns: {
+            tenantId: true,
+          },
+          where: eq(tenantMemberships.userId, targetMembershipInTx.userId),
+        });
+
+        await tx
+          .update(user)
+          .set({ defaultTenantId: fallbackMembership?.tenantId ?? null })
+          .where(and(eq(user.id, targetMembershipInTx.userId), eq(user.defaultTenantId, tenantId)));
+
+        const shouldInvalidateSessions = isSelfRemoval || !fallbackMembership;
+
+        if (shouldInvalidateSessions) {
+          await tx.delete(session).where(eq(session.userId, targetMembershipInTx.userId));
+        }
+
+        const adminCountAfterRemoval = await countTenantAdmins({ tenantId, db: tx });
+        assertTenantHasAdminOrThrow(adminCountAfterRemoval);
+
+        return {
+          targetUserId: targetMembershipInTx.userId,
+          targetRole: targetMembershipInTx.role,
+          sessionsInvalidated: shouldInvalidateSessions,
+        };
+      });
+
+      if (isSelfRemoval) {
+        ctx.responseHeaders.append("Set-Cookie", buildClearSessionCookie());
+      }
+
+      logger.info(
+        {
+          event: isSelfRemoval
+            ? "audit.auth.team_member.self_removal.confirmed"
+            : "audit.auth.team_member.remove.success",
+          actorUserId: ctx.session.user.id,
+          tenantId,
+          targetUserId: removalResult.targetUserId,
+          targetRole: removalResult.targetRole,
+          sessionsInvalidated: removalResult.sessionsInvalidated,
+        },
+        "Member removed from tenant"
+      );
+
+      return {
+        success: true,
+        message: isSelfRemoval
+          ? "You have been removed from this tenant."
+          : "Member removed successfully.",
+        requiresSecondConfirmation: false,
+        memberUserId: removalResult.targetUserId,
+      };
+    }),
 
   /**
    * Get the current authenticated user's tenant memberships

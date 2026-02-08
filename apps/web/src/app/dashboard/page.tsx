@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 
 import { LogoutButton } from "~/features/auth/components/logout-button";
 import { getSession } from "~/server/better-auth/server";
@@ -35,6 +36,14 @@ export default async function DashboardPage() {
           <p className="mt-2 text-gray-600">
             You are now logged in as {session.user.name}.
           </p>
+          <div className="mt-4">
+            <Link
+              href="/team"
+              className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-500"
+            >
+              Manage team members
+            </Link>
+          </div>
           <div className="mt-6">
             <p className="text-sm text-gray-500">User ID: {session.user.id}</p>
           </div>
