@@ -115,6 +115,30 @@ export const tenantMemberships = pgTable("tenant_memberships", {
     .notNull(),
 });
 
+export const tenantInvitations = pgTable("tenant_invitations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id")
+    .notNull()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  email: varchar("email", { length: 255 }).notNull(),
+  role: tenantRoleEnum("role").notNull(),
+  tokenHash: varchar("token_hash", { length: 255 }).notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+  invitedByUserId: text("invited_by_user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .$defaultFn(() => new Date())
+    .notNull(),
+}, (table) => [
+  index("idx_invitations_tenant_id").on(table.tenantId),
+  index("idx_invitations_token_hash").on(table.tokenHash),
+  index("idx_invitations_tenant_email").on(table.tenantId, table.email),
+  index("idx_invitations_email").on(table.email),
+]);
+
 // ============================================
 // Example/Demo Table (can be removed later)
 // ============================================
@@ -176,6 +200,20 @@ export const tenantMembershipsRelations = relations(
   })
 );
 
+export const tenantInvitationsRelations = relations(
+  tenantInvitations,
+  ({ one }) => ({
+    tenant: one(tenants, {
+      fields: [tenantInvitations.tenantId],
+      references: [tenants.id],
+    }),
+    invitedBy: one(user, {
+      fields: [tenantInvitations.invitedByUserId],
+      references: [user.id],
+    }),
+  })
+);
+
 // ============================================
 // Type Exports
 // ============================================
@@ -186,3 +224,5 @@ export type Tenant = typeof tenants.$inferSelect;
 export type NewTenant = typeof tenants.$inferInsert;
 export type TenantMembership = typeof tenantMemberships.$inferSelect;
 export type NewTenantMembership = typeof tenantMemberships.$inferInsert;
+export type TenantInvitation = typeof tenantInvitations.$inferSelect;
+export type NewTenantInvitation = typeof tenantInvitations.$inferInsert;

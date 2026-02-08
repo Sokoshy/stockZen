@@ -29,6 +29,23 @@ export async function setTenantContext(
 }
 
 /**
+ * Set invitation token hash context for public invitation operations.
+ *
+ * This enables RLS policies that allow selecting/updating a single
+ * invitation row based on the hashed token value without exposing
+ * cross-tenant invitation data.
+ */
+export async function setInvitationTokenContext(
+  tokenHash: string,
+  client: DbClient = db
+): Promise<void> {
+  await client.execute(
+    sql`SELECT set_config('app.invitation_token_hash', ${tokenHash}, true)`
+  );
+  await client.execute(sql`SELECT set_config('row_security', 'on', true)`);
+}
+
+/**
  * Clear the tenant context
  * Use this when you need to bypass RLS (e.g., for admin operations)
  */
