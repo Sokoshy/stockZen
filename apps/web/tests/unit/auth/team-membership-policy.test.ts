@@ -32,7 +32,7 @@ describe("team membership policy helpers", () => {
     });
 
     expect(result.allowed).toBe(false);
-    expect(result.reason).toContain("Last Admin");
+    expect((result as { reason: string }).reason).toContain("Last Admin");
   });
 
   it("allows role change when tenant still has another admin", () => {
@@ -56,7 +56,7 @@ describe("team membership policy helpers", () => {
     });
 
     expect(result.allowed).toBe(false);
-    expect(result.reason).toContain("Last Admin");
+    expect((result as { reason: string }).reason).toContain("Last Admin");
   });
 
   it("requires session invalidation only for Admin downgrades", () => {
