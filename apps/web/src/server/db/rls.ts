@@ -6,6 +6,9 @@ import type * as schema from "./schema";
 
 type DbClient = Pick<PostgresJsDatabase<typeof schema>, "execute">;
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 /**
  * Set the tenant context for RLS policies
  * This must be called before any tenant-scoped queries
@@ -21,11 +24,13 @@ export async function setTenantContext(
   tenantId: string | null,
   client: DbClient = db
 ): Promise<void> {
+  if (tenantId !== null && !UUID_PATTERN.test(tenantId)) {
+    throw new Error("Invalid tenant ID format. Expected UUID.");
+  }
+
   const value = tenantId ?? "";
   await client.execute(sql`SELECT set_config('app.tenant_id', ${value}, true)`);
-  if (tenantId) {
-    await client.execute(sql`SELECT set_config('row_security', 'on', true)`);
-  }
+  await client.execute(sql`SELECT set_config('row_security', 'on', true)`);
 }
 
 /**

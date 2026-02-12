@@ -87,6 +87,12 @@ describe("Tenant Management", () => {
       await expect(setTenantContext(testTenantId)).resolves.not.toThrow();
     });
 
+    it("should reject invalid tenant context format", async () => {
+      await expect(setTenantContext("invalid-tenant-id")).rejects.toThrow(
+        "Invalid tenant ID format"
+      );
+    });
+
     it("should get tenant context after setting it", async () => {
       const testTenantId = "123e4567-e89b-12d3-a456-426614174001";
 
