@@ -36,7 +36,13 @@ export default async function DashboardPage() {
           <p className="mt-2 text-gray-600">
             You are now logged in as {session.user.name}.
           </p>
-          <div className="mt-4">
+          <div className="mt-4 flex flex-wrap gap-3">
+            <Link
+              href="/products"
+              className="inline-flex items-center rounded-md bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
+            >
+              View products
+            </Link>
             <Link
               href="/team"
               className="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-500"
