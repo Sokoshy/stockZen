@@ -19,6 +19,7 @@ export async function cleanDatabase(db: ReturnType<typeof createTestDb>) {
   const client = await db.$client;
 
   const tablesInDeleteOrder = [
+    "products",
     "tenant_invitations",
     "tenant_memberships",
     "tenants",

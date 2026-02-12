@@ -2,6 +2,8 @@ import { relations } from "drizzle-orm";
 import {
   boolean,
   index,
+  integer,
+  numeric,
   pgTable,
   pgTableCreator,
   text,
@@ -140,6 +142,38 @@ export const tenantInvitations = pgTable("tenant_invitations", {
 ]);
 
 // ============================================
+// Product Management Tables
+// ============================================
+
+export const products = pgTable(
+  "products",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 255 }).notNull(),
+    description: text("description"),
+    sku: varchar("sku", { length: 100 }),
+    price: numeric("price", { precision: 10, scale: 2 }).notNull().default("0"),
+    purchasePrice: numeric("purchase_price", { precision: 10, scale: 2 }),
+    quantity: integer("quantity").notNull().default(0),
+    lowStockThreshold: integer("low_stock_threshold"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .$defaultFn(() => new Date())
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("idx_products_tenant_id").on(table.tenantId),
+    index("idx_products_tenant_name").on(table.tenantId, table.name),
+    index("idx_products_sku").on(table.sku),
+  ]
+);
+
+// ============================================
 // Example/Demo Table (can be removed later)
 // ============================================
 
@@ -214,6 +248,13 @@ export const tenantInvitationsRelations = relations(
   })
 );
 
+export const productsRelations = relations(products, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [products.tenantId],
+    references: [tenants.id],
+  }),
+}));
+
 // ============================================
 // Type Exports
 // ============================================
@@ -226,3 +267,5 @@ export type TenantMembership = typeof tenantMemberships.$inferSelect;
 export type NewTenantMembership = typeof tenantMemberships.$inferInsert;
 export type TenantInvitation = typeof tenantInvitations.$inferSelect;
 export type NewTenantInvitation = typeof tenantInvitations.$inferInsert;
+export type Product = typeof products.$inferSelect;
+export type NewProduct = typeof products.$inferInsert;
