@@ -418,15 +418,6 @@ export const authRouter = createTRPCRouter({
           throw new TRPCError({ code: "UNAUTHORIZED", message: GENERIC_LOGIN_ERROR });
         }
 
-        const dbSessionToken = signInResponse.token;
-
-        if (!dbSessionToken) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: "Failed to establish session after login.",
-          });
-        }
-
         const sessionTtl = rememberMe ? REMEMBER_ME_SESSION_TTL_SECONDS : DEFAULT_SESSION_TTL_SECONDS;
         const sessionExpiresAt = new Date(Date.now() + sessionTtl * 1000);
 
@@ -463,33 +454,21 @@ export const authRouter = createTRPCRouter({
             .map((headerValue) => getSessionTokenFromSetCookie(headerValue))
             .find((value): value is string => Boolean(value)) ?? null;
 
-        if (setCookieHeaders.length > 0) {
-          for (const headerValue of setCookieHeaders) {
-            ctx.responseHeaders.append("Set-Cookie", headerValue);
-          }
-        } else {
-          ctx.responseHeaders.append(
-            "Set-Cookie",
-            buildSessionCookie({
-              token: dbSessionToken,
-              expiresAt: sessionExpiresAt,
-              persistent: false,
-            })
-          );
+        if (!cookieSessionToken) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Failed to establish session cookie after login.",
+          });
         }
 
-        const persistentCookieToken = cookieSessionToken ?? dbSessionToken;
-
-        if (rememberMe) {
-          ctx.responseHeaders.append(
-            "Set-Cookie",
-            buildSessionCookie({
-              token: persistentCookieToken,
-              expiresAt: sessionExpiresAt,
-              persistent: true,
-            })
-          );
-        }
+        ctx.responseHeaders.append(
+          "Set-Cookie",
+          buildSessionCookie({
+            token: cookieSessionToken,
+            expiresAt: rememberMe ? sessionExpiresAt : undefined,
+            persistent: rememberMe,
+          })
+        );
 
         logger.info(
           {
