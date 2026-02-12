@@ -3,13 +3,11 @@
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useRouter } from "next/navigation";
 
 import { loginSchema, type LoginFormInput } from "~/schemas/auth";
 import { api } from "~/trpc/react";
 
 export function LoginForm() {
-  const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
 
   const {
@@ -28,8 +26,9 @@ export function LoginForm() {
 
   const loginMutation = api.auth.login.useMutation({
     onSuccess: () => {
-      router.push("/dashboard");
-      router.refresh();
+      window.setTimeout(() => {
+        window.location.assign("/dashboard");
+      }, 50);
     },
     onError: (error) => {
       setServerError(null);
@@ -54,7 +53,7 @@ export function LoginForm() {
 
   const onSubmit = async (data: LoginFormInput) => {
     setServerError(null);
-    await loginMutation.mutateAsync(loginSchema.parse(data));
+    await loginMutation.mutateAsync(loginSchema.parse(data)).catch(() => undefined);
   };
 
   return (

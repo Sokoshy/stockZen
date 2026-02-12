@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useRouter } from "next/navigation";
 
 import { signUpSchema, type SignUpInput } from "~/schemas/auth";
 import { api } from "~/trpc/react";
@@ -13,7 +12,6 @@ interface SignUpFormProps {
 }
 
 export function SignUpForm({ onSuccess }: SignUpFormProps) {
-  const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
 
   const {
@@ -35,8 +33,9 @@ export function SignUpForm({ onSuccess }: SignUpFormProps) {
     onSuccess: (data) => {
       if (data.success) {
         onSuccess?.();
-        router.push("/dashboard");
-        router.refresh();
+        window.setTimeout(() => {
+          window.location.assign("/dashboard");
+        }, 50);
       }
     },
     onError: (error) => {
@@ -70,7 +69,7 @@ export function SignUpForm({ onSuccess }: SignUpFormProps) {
 
   const onSubmit = async (data: SignUpInput) => {
     setServerError(null);
-    await signUpMutation.mutateAsync(data);
+    await signUpMutation.mutateAsync(data).catch(() => undefined);
   };
 
   return (

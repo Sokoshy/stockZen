@@ -1,16 +1,13 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-
 import { api } from "~/trpc/react";
 
 export function LogoutButton() {
-  const router = useRouter();
-
   const logoutMutation = api.auth.logout.useMutation({
     onSuccess: () => {
-      router.push("/login");
-      router.refresh();
+      window.setTimeout(() => {
+        window.location.assign("/login");
+      }, 50);
     },
   });
 
