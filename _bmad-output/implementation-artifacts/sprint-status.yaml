@@ -48,7 +48,7 @@ development_status:
   1-5-team-membership-roles-management-admin-manager-operator: done
   1-6-invite-user-to-tenant-revocable-expiring-link-set-password: done
   1-7-rbac-enforcement-hide-purchaseprice-for-operators: review
-  1-8-tenant-isolation-enforcement-rls-anti-leak-tests: backlog
+  1-8-tenant-isolation-enforcement-rls-anti-leak-tests: done
   1-9-audit-logs-for-sensitive-account-actions-auth-team: backlog
   epic-1-retrospective: optional
 
