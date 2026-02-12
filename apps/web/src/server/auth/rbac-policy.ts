@@ -3,15 +3,9 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "~/lib/env";
 import type { TenantRole } from "~/schemas/team-membership";
 
-const rolePriority: Record<TenantRole, number> = {
-  Admin: 3,
-  Manager: 2,
-  Operator: 1,
-};
+const SELF_REMOVE_CONFIRMATION_TTL_SECONDS = 300; // 5 minutes
 
-const SELF_REMOVE_CONFIRMATION_TTL_SECONDS = 10 * 60;
-
-type RoleChangePolicyInput = {
+export type RoleChangePolicyInput = {
   actorUserId: string;
   targetUserId: string;
   currentRole: TenantRole;
@@ -19,17 +13,30 @@ type RoleChangePolicyInput = {
   adminCount: number;
 };
 
-type RemovePolicyInput = {
+export type RemovePolicyInput = {
   actorUserId: string;
   targetUserId: string;
   targetRole: TenantRole;
   adminCount: number;
 };
 
-type PolicyResult = {
-  allowed: boolean;
-  reason?: string;
+export type PolicyResult =
+  | { allowed: true }
+  | { allowed: false; reason: string };
+
+const rolePriority: Record<TenantRole, number> = {
+  Admin: 3,
+  Manager: 2,
+  Operator: 1,
 };
+
+export function canViewPurchasePrice(role: TenantRole): boolean {
+  return rolePriority[role] >= rolePriority["Manager"];
+}
+
+export function canWritePurchasePrice(role: TenantRole): boolean {
+  return rolePriority[role] >= rolePriority["Manager"];
+}
 
 export function isAdminRole(role: TenantRole): boolean {
   return role === "Admin";
