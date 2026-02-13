@@ -29,6 +29,43 @@ function quoteIdentifier(identifier: string): string {
   return `"${identifier.replace(/"/g, '""')}"`;
 }
 
+async function ensureProductStory21Columns(target: ReturnType<typeof postgres>): Promise<void> {
+  const productsTableExists = await target<{ exists: boolean }[]>`
+    select exists (
+      select 1
+      from information_schema.tables
+      where table_schema = 'public'
+        and table_name = 'products'
+    ) as exists
+  `;
+
+  if (!productsTableExists[0]?.exists) {
+    return;
+  }
+
+  const existingColumns = await target<{ column_name: string }[]>`
+    select column_name
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'products'
+      and column_name in ('category', 'unit', 'barcode')
+  `;
+
+  const requiredColumns = ["category", "unit", "barcode"];
+  const existingColumnSet = new Set(existingColumns.map((column) => column.column_name));
+  if (requiredColumns.every((column) => existingColumnSet.has(column))) {
+    return;
+  }
+
+  await target.unsafe(`
+    ALTER TABLE products ADD COLUMN IF NOT EXISTS category VARCHAR(100);
+    ALTER TABLE products ADD COLUMN IF NOT EXISTS unit VARCHAR(50);
+    ALTER TABLE products ADD COLUMN IF NOT EXISTS barcode VARCHAR(100);
+    CREATE INDEX IF NOT EXISTS idx_products_tenant_category ON products(tenant_id, category);
+    CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode) WHERE barcode IS NOT NULL;
+  `);
+}
+
 export async function ensureTestDatabaseReady(): Promise<void> {
   const testDatabaseUrlRaw = getTestDatabaseUrl();
 
@@ -94,6 +131,7 @@ export async function ensureTestDatabaseReady(): Promise<void> {
     `;
 
     if (tableCheck[0]?.exists) {
+      await ensureProductStory21Columns(target);
       return;
     }
 
@@ -106,6 +144,8 @@ export async function ensureTestDatabaseReady(): Promise<void> {
       const migrationSql = await readFile(path.join(migrationsDir, migrationFile), "utf8");
       await target.unsafe(migrationSql);
     }
+
+    await ensureProductStory21Columns(target);
   } catch {
   } finally {
     await target.end({ timeout: 5 });
