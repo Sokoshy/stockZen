@@ -1,6 +1,6 @@
 # Story 1.7: RBAC Enforcement + Hide `purchasePrice` for Operators
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -204,6 +204,8 @@ openai/gpt-5.3-codex
 - Story already in-progress in sprint-status.yaml: `1-7-rbac-enforcement-hide-purchaseprice-for-operators`.
 - Implemented RBAC field-level enforcement for purchasePrice visibility.
 - Added server-side controls for role-based data filtering.
+- Senior code review hardening applied on 2026-02-13 (RLS fail-safe, migration/schema alignment, nullable update contract, audit logging for blocked writes).
+- Verified prior implementation claims against git history commits: `91ad115`, `1225d1a`, `5e7d601`.
 
 ### Implementation Plan
 
@@ -271,10 +273,39 @@ openai/gpt-5.3-codex
 - apps/web/tests/unit/auth/product-rbac-policy.test.ts (created)
 - apps/web/tests/unit/auth/product-serializer.test.ts (created)
 - apps/web/drizzle/0004_products_rbac_baseline.sql (created)
+- apps/web/src/server/api/routers/products.ts (modified - added blocked purchasePrice write audit warnings and nullable purchasePrice update handling)
+- apps/web/src/schemas/products.ts (modified - nullable clear support for update payload fields)
+- apps/web/tests/integration/products-rbac.test.ts (modified - added Admin null-clear purchasePrice integration coverage)
+- apps/web/drizzle/0009_products_security_hardening.sql (created - force products RLS and tenant/name index alignment)
+- apps/web/drizzle/meta/_journal.json (modified - migration registry entry for 0009)
 - _bmad-output/implementation-artifacts/1-7-rbac-enforcement-hide-purchaseprice-for-operators.md (this file)
+
+## Senior Developer Review (AI)
+
+- Reviewer: Sokoshy
+- Date: 2026-02-13
+- Outcome: Approved after fixes
+
+### Findings Resolved
+
+- HIGH: Added fail-safe DB enforcement with `FORCE ROW LEVEL SECURITY` for products (`apps/web/drizzle/0009_products_security_hardening.sql`).
+- MEDIUM: Aligned migration index coverage with tenant-scoped schema intent by adding `idx_products_tenant_name`.
+- MEDIUM: Enabled explicit nullable clear behavior for update payload fields (including `purchasePrice`) in product input contracts and update path (`apps/web/src/schemas/products.ts`, `apps/web/src/server/api/routers/products.ts`).
+- LOW: Added structured warning logs for Operator attempts to write `purchasePrice` on create/update.
+
+### Validation Evidence
+
+- `bun run --cwd apps/web test:run --maxWorkers=1` → 23 passed test files, 181 passed tests.
+- `bun run --cwd apps/web typecheck` → success.
+- Added integration coverage for Admin clearing `purchasePrice` to `null` (`apps/web/tests/integration/products-rbac.test.ts`).
+
+### Notes
+
+- The earlier "story File List vs working tree" discrepancy was reconciled by validating historical commits (`91ad115`, `1225d1a`, `5e7d601`) that touched the claimed files.
 
 ## Change Log
 
 - 2026-02-08: Story 1.7 created with comprehensive RBAC and field-level authorization guidance; status set to ready-for-dev.
 - 2026-02-12: Story implementation completed - RBAC enforcement for purchasePrice, product API with role-aware filtering, unit tests passing
 - 2026-02-12: Story hardening pass completed - least-privilege Operator queries, typed product output contracts, products UI role guardrails, and products RBAC integration tests added
+- 2026-02-13: Senior review fixes applied - forced products RLS, aligned tenant/name index migration, enabled nullable clear update contract, added blocked write audit warnings, and expanded integration test coverage.
