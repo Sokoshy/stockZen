@@ -17,6 +17,12 @@ export default async function ProductsPage() {
     redirect("/login");
   }
 
+  const membership = await api.auth.getCurrentTenantMembership();
+
+  if (!membership) {
+    redirect("/dashboard");
+  }
+
   const data = await api.products.list();
 
   return (
@@ -30,15 +36,28 @@ export default async function ProductsPage() {
             </p>
           </div>
 
-          <Link
-            href="/dashboard"
-            className="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-100"
-          >
-            Back to dashboard
-          </Link>
+          <div className="flex gap-2">
+            <Link
+              href="/products/create"
+              className="inline-flex items-center rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700"
+            >
+              Create Product
+            </Link>
+
+            <Link
+              href="/dashboard"
+              className="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-100"
+            >
+              Back to dashboard
+            </Link>
+          </div>
         </div>
 
-        <ProductsTable products={data.products} actorRole={data.actorRole} />
+        <ProductsTable
+          products={data.products}
+          actorRole={data.actorRole}
+          tenantId={membership.tenantId}
+        />
       </div>
     </div>
   );

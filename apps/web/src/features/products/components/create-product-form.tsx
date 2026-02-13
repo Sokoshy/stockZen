@@ -1,0 +1,289 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+
+import { productInputSchema } from "~/schemas/products";
+import { createProductOffline } from "~/features/offline/product-operations";
+import { api } from "~/trpc/react";
+
+const createProductFormSchema = productInputSchema.extend({
+  name: z.string().min(1, "Name is required").max(255),
+  category: z.string().min(1, "Category is required").max(100),
+  unit: z.string().min(1, "Unit is required").max(50),
+  price: z.number().nonnegative("Price must be non-negative"),
+});
+
+type CreateProductFormData = z.infer<typeof createProductFormSchema>;
+
+interface CreateProductFormProps {
+  tenantId: string;
+  canWritePurchasePrice: boolean;
+}
+
+export function CreateProductForm({ tenantId, canWritePurchasePrice }: CreateProductFormProps) {
+  const router = useRouter();
+  const [isOffline, setIsOffline] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  const createProductMutation = api.products.create.useMutation({
+    onError: (error) => {
+      setError(error.message);
+    },
+  });
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+    reset,
+  } = useForm<CreateProductFormData>({
+    resolver: zodResolver(createProductFormSchema),
+    defaultValues: {
+      name: "",
+      description: null,
+      sku: null,
+      category: "",
+      unit: "",
+      barcode: null,
+      price: 0,
+      purchasePrice: null,
+      quantity: 0,
+      lowStockThreshold: null,
+    },
+  });
+
+  const onSubmit = async (data: CreateProductFormData) => {
+    setIsSubmitting(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      if (isOffline) {
+        await createProductOffline({
+          tenantId,
+          name: data.name,
+          description: data.description,
+          sku: data.sku,
+          category: data.category,
+          unit: data.unit,
+          barcode: data.barcode,
+          price: data.price,
+          purchasePrice: canWritePurchasePrice ? data.purchasePrice : null,
+          quantity: data.quantity ?? 0,
+          lowStockThreshold: data.lowStockThreshold,
+        });
+        setSuccess("Product created offline and queued for sync.");
+        reset();
+        router.push("/products");
+      } else {
+        await createProductMutation.mutateAsync({
+          name: data.name,
+          description: data.description,
+          sku: data.sku,
+          category: data.category,
+          unit: data.unit,
+          barcode: data.barcode,
+          price: data.price,
+          purchasePrice: canWritePurchasePrice ? data.purchasePrice : null,
+          quantity: data.quantity ?? 0,
+          lowStockThreshold: data.lowStockThreshold,
+        });
+        setSuccess("Product created successfully.");
+        reset();
+        router.push("/products");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create product");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+      {success && (
+        <div className="rounded-md bg-green-50 p-4 text-sm text-green-700" role="status">
+          {success}
+        </div>
+      )}
+
+      {error && (
+        <div className="rounded-md bg-red-50 p-4 text-sm text-red-600">{error}</div>
+      )}
+
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+        <div>
+          <label htmlFor="name" className="block text-sm font-medium text-gray-700">
+            Name *
+          </label>
+          <input
+            {...register("name")}
+            type="text"
+            id="name"
+            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          {errors.name && <p className="mt-1 text-sm text-red-600">{errors.name.message}</p>}
+        </div>
+
+        <div>
+          <label htmlFor="category" className="block text-sm font-medium text-gray-700">
+            Category *
+          </label>
+          <input
+            {...register("category")}
+            type="text"
+            id="category"
+            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          {errors.category && (
+            <p className="mt-1 text-sm text-red-600">{errors.category.message}</p>
+          )}
+        </div>
+
+        <div>
+          <label htmlFor="unit" className="block text-sm font-medium text-gray-700">
+            Unit *
+          </label>
+          <input
+            {...register("unit")}
+            type="text"
+            id="unit"
+            placeholder="e.g., kg, pcs, box"
+            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          {errors.unit && <p className="mt-1 text-sm text-red-600">{errors.unit.message}</p>}
+        </div>
+
+        <div>
+          <label htmlFor="barcode" className="block text-sm font-medium text-gray-700">
+            Barcode (optional)
+          </label>
+          <input
+            {...register("barcode")}
+            type="text"
+            id="barcode"
+            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          {errors.barcode && (
+            <p className="mt-1 text-sm text-red-600">{errors.barcode.message}</p>
+          )}
+        </div>
+
+        <div>
+          <label htmlFor="price" className="block text-sm font-medium text-gray-700">
+            Sale Price *
+          </label>
+          <input
+            {...register("price", { valueAsNumber: true })}
+            type="number"
+            id="price"
+            step="0.01"
+            min="0"
+            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          {errors.price && (
+            <p className="mt-1 text-sm text-red-600">{errors.price.message}</p>
+          )}
+        </div>
+
+        {canWritePurchasePrice && (
+          <div>
+            <label htmlFor="purchasePrice" className="block text-sm font-medium text-gray-700">
+              Purchase Price (Cost)
+            </label>
+            <input
+              {...register("purchasePrice", { valueAsNumber: true })}
+              type="number"
+              id="purchasePrice"
+              step="0.01"
+              min="0"
+              className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            {errors.purchasePrice && (
+              <p className="mt-1 text-sm text-red-600">{errors.purchasePrice.message}</p>
+            )}
+          </div>
+        )}
+
+        <div>
+          <label htmlFor="quantity" className="block text-sm font-medium text-gray-700">
+            Initial Quantity
+          </label>
+          <input
+            {...register("quantity", { valueAsNumber: true })}
+            type="number"
+            id="quantity"
+            min="0"
+            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </div>
+
+        <div>
+          <label
+            htmlFor="lowStockThreshold"
+            className="block text-sm font-medium text-gray-700"
+          >
+            Low Stock Threshold
+          </label>
+          <input
+            {...register("lowStockThreshold", { valueAsNumber: true })}
+            type="number"
+            id="lowStockThreshold"
+            min="0"
+            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </div>
+
+        <div>
+          <label htmlFor="sku" className="block text-sm font-medium text-gray-700">
+            SKU (optional)
+          </label>
+          <input
+            {...register("sku")}
+            type="text"
+            id="sku"
+            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </div>
+
+        <div>
+          <label htmlFor="description" className="block text-sm font-medium text-gray-700">
+            Description (optional)
+          </label>
+          <textarea
+            {...register("description")}
+            id="description"
+            rows={2}
+            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </div>
+      </div>
+
+      <div className="flex items-center gap-4">
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className="inline-flex items-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50"
+        >
+          {isSubmitting ? "Creating..." : "Create Product"}
+        </button>
+
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={isOffline}
+            onChange={(e) => setIsOffline(e.target.checked)}
+            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm text-gray-600">Save offline (no server sync)</span>
+        </label>
+      </div>
+    </form>
+  );
+}
