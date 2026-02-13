@@ -47,13 +47,13 @@ development_status:
   1-4-password-reset-via-email-link-one-time-token: done
   1-5-team-membership-roles-management-admin-manager-operator: done
   1-6-invite-user-to-tenant-revocable-expiring-link-set-password: done
-  1-7-rbac-enforcement-hide-purchaseprice-for-operators: review
+  1-7-rbac-enforcement-hide-purchaseprice-for-operators: done
   1-8-tenant-isolation-enforcement-rls-anti-leak-tests: done
   1-9-audit-logs-for-sensitive-account-actions-auth-team: done
   epic-1-retrospective: optional
 
-  epic-2: backlog
-  2-1-create-product-offline-first: backlog
+  epic-2: in-progress
+  2-1-create-product-offline-first: done
   2-2-edit-delete-products-product-list-filters-offline-first: backlog
   2-3-record-stock-entry-exit-offline-3-click-loop: backlog
   2-4-movement-history-per-product-newest-first-infinite-scroll: backlog
