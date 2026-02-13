@@ -23,6 +23,9 @@ const operatorProductColumns = {
   name: products.name,
   description: products.description,
   sku: products.sku,
+  category: products.category,
+  unit: products.unit,
+  barcode: products.barcode,
   price: products.price,
   quantity: products.quantity,
   lowStockThreshold: products.lowStockThreshold,
@@ -161,6 +164,9 @@ export const productsRouter = createTRPCRouter({
           tenantId,
           description: fullInput.description ?? null,
           sku: fullInput.sku ?? null,
+          category: fullInput.category ?? null,
+          unit: fullInput.unit ?? null,
+          barcode: fullInput.barcode ?? null,
           quantity: fullInput.quantity ?? 0,
           lowStockThreshold: fullInput.lowStockThreshold ?? null,
           purchasePrice: fullInput.purchasePrice?.toString() ?? null,
@@ -240,6 +246,9 @@ export const productsRouter = createTRPCRouter({
       if (fullData.name !== undefined) updateData.name = fullData.name;
       if (fullData.description !== undefined) updateData.description = fullData.description;
       if (fullData.sku !== undefined) updateData.sku = fullData.sku;
+      if (fullData.category !== undefined) updateData.category = fullData.category;
+      if (fullData.unit !== undefined) updateData.unit = fullData.unit;
+      if (fullData.barcode !== undefined) updateData.barcode = fullData.barcode;
       if (fullData.price !== undefined) updateData.price = fullData.price.toString();
       if (fullData.quantity !== undefined) updateData.quantity = fullData.quantity;
       if (fullData.lowStockThreshold !== undefined) {

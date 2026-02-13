@@ -199,6 +199,9 @@ export const products = pgTable(
     name: varchar("name", { length: 255 }).notNull(),
     description: text("description"),
     sku: varchar("sku", { length: 100 }),
+    category: varchar("category", { length: 100 }),
+    unit: varchar("unit", { length: 50 }),
+    barcode: varchar("barcode", { length: 100 }),
     price: numeric("price", { precision: 10, scale: 2 }).notNull().default("0"),
     purchasePrice: numeric("purchase_price", { precision: 10, scale: 2 }),
     quantity: integer("quantity").notNull().default(0),
@@ -214,6 +217,8 @@ export const products = pgTable(
     index("idx_products_tenant_id").on(table.tenantId),
     index("idx_products_tenant_name").on(table.tenantId, table.name),
     index("idx_products_sku").on(table.sku),
+    index("idx_products_tenant_category").on(table.tenantId, table.category),
+    index("idx_products_barcode").on(table.barcode),
   ]
 );
 

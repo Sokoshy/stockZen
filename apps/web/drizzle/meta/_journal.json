@@ -61,6 +61,12 @@
       "when": 1770987000000,
       "tag": "0009_products_security_hardening",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "when": 1770993000000,
+      "tag": "0010_products_story_21_fields",
+      "breakpoints": true
     }
   ]
 }

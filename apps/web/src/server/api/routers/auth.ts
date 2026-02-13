@@ -2095,6 +2095,30 @@ export const authRouter = createTRPCRouter({
         nextCursor,
       };
     }),
+
+  getCurrentTenantMembership: protectedProcedure
+    .query(async ({ ctx }) => {
+      const userId = ctx.session.user.id;
+      const tenantId = ctx.tenantId;
+
+      if (!tenantId) {
+        return null;
+      }
+
+      const membership = await ctx.db.query.tenantMemberships.findFirst({
+        where: (tm, { and: andExpr, eq: eqExpr }) =>
+          andExpr(eqExpr(tm.userId, userId), eqExpr(tm.tenantId, tenantId)),
+      });
+
+      if (!membership) {
+        return null;
+      }
+
+      return {
+        tenantId: membership.tenantId,
+        role: membership.role,
+      };
+    }),
 });
 
 /**
