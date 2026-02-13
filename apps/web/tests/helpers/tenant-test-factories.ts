@@ -301,4 +301,162 @@ export async function verifyTenantIsolation(
   return { readBlocked, writeBlocked, details };
 }
 
+export interface TenantWithAdmin {
+  admin: {
+    id: string;
+    email: string;
+    name: string;
+  };
+  tenant: {
+    id: string;
+    name: string;
+  };
+  password: string;
+  sessionToken: string;
+}
+
+export interface UserWithMembership {
+  user: {
+    id: string;
+    email: string;
+    name: string;
+  };
+  tenantId: string;
+  role: string;
+  sessionToken: string;
+}
+
+export async function createTenantWithAdmin(prefix: string): Promise<TenantWithAdmin> {
+  const email = generateTestEmail(prefix);
+  const password = "Password123!";
+  const tenantName = generateTestTenantName(prefix);
+
+  const ctx = await createTRPCContext({
+    headers: new Headers({ "x-forwarded-for": nextIp() }),
+  });
+  const caller = createCaller(ctx);
+
+  const result = await caller.auth.signUp({
+    email,
+    password,
+    confirmPassword: password,
+    tenantName,
+  });
+
+  if (!result.user?.id || !result.tenant?.id) {
+    throw new Error("Failed to create tenant with admin");
+  }
+
+  await testDb.delete(session).where(eq(session.userId, result.user.id));
+
+  const loginCtx = await createTRPCContext({
+    headers: new Headers({ "x-forwarded-for": nextIp() }),
+  });
+  const loginCaller = createCaller(loginCtx);
+  await loginCaller.auth.login({
+    email,
+    password,
+    rememberMe: false,
+  });
+
+  const setCookie = loginCtx.responseHeaders.get("set-cookie");
+  if (!setCookie) {
+    throw new Error("Expected login to include session cookie");
+  }
+
+  return {
+    admin: {
+      id: result.user.id,
+      email: result.user.email,
+      name: result.user.name,
+    },
+    tenant: {
+      id: result.tenant.id,
+      name: result.tenant.name,
+    },
+    password,
+    sessionToken: extractSessionCookie(setCookie),
+  };
+}
+
+export async function createUserWithMembership({
+  tenantId,
+  role,
+  emailPrefix,
+}: {
+  tenantId: string;
+  role: "Admin" | "Manager" | "Operator";
+  emailPrefix: string;
+}): Promise<UserWithMembership> {
+  const email = generateTestEmail(emailPrefix);
+  const password = "Password123!";
+
+  // Create user through sign-up first
+  const ctx = await createTRPCContext({
+    headers: new Headers({ "x-forwarded-for": nextIp() }),
+  });
+  const caller = createCaller(ctx);
+
+  // First create the user by signing up in a different tenant
+  const tempTenantName = generateTestTenantName(`${emailPrefix}-temp`);
+  const signUpResult = await caller.auth.signUp({
+    email,
+    password,
+    confirmPassword: password,
+    tenantName: tempTenantName,
+  });
+
+  if (!signUpResult.user?.id) {
+    throw new Error("Failed to create user");
+  }
+
+  // Add user to the target tenant with the specified role
+  await testDb.insert(tenantMemberships).values({
+    tenantId,
+    userId: signUpResult.user.id,
+    role,
+  });
+
+  // Update default tenant
+  await testDb
+    .update(user)
+    .set({ defaultTenantId: tenantId })
+    .where(eq(user.id, signUpResult.user.id));
+
+  // Login to get session token
+  const loginCtx = await createTRPCContext({
+    headers: new Headers({ "x-forwarded-for": nextIp() }),
+  });
+  const loginCaller = createCaller(loginCtx);
+  await loginCaller.auth.login({
+    email,
+    password,
+    rememberMe: false,
+  });
+
+  const setCookie = loginCtx.responseHeaders.get("set-cookie");
+  if (!setCookie) {
+    throw new Error("Expected login to include session cookie");
+  }
+
+  return {
+    user: {
+      id: signUpResult.user.id,
+      email: signUpResult.user.email,
+      name: signUpResult.user.name,
+    },
+    tenantId,
+    role,
+    sessionToken: extractSessionCookie(setCookie),
+  };
+}
+
+export async function getTestDb() {
+  return testDb;
+}
+
+export async function cleanupTestData(): Promise<void> {
+  await cleanDatabase(testDb);
+}
+
 export { testDb, nextIp };
