@@ -142,6 +142,50 @@ export const tenantInvitations = pgTable("tenant_invitations", {
 ]);
 
 // ============================================
+// Audit Events Table
+// ============================================
+
+export const auditActionTypeEnum = pgEnum("audit_action_type", [
+  "login",
+  "logout",
+  "password_reset_completed",
+  "invite_created",
+  "invite_revoked",
+  "role_changed",
+  "member_removed",
+  "login_failed",
+  "forbidden_attempt",
+]);
+
+export const auditStatusEnum = pgEnum("audit_status", [
+  "success",
+  "failure",
+]);
+
+export const auditEvents = pgTable(
+  "audit_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    actorUserId: text("actor_user_id"),
+    actionType: auditActionTypeEnum("action_type").notNull(),
+    targetType: varchar("target_type", { length: 100 }),
+    targetId: text("target_id"),
+    status: auditStatusEnum("status").notNull(),
+    context: text("context"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("idx_audit_events_tenant_created").on(table.tenantId, table.createdAt),
+    index("idx_audit_events_tenant_action").on(table.tenantId, table.actionType),
+  ]
+);
+
+// ============================================
 // Product Management Tables
 // ============================================
 
@@ -248,6 +292,17 @@ export const tenantInvitationsRelations = relations(
   })
 );
 
+export const auditEventsRelations = relations(auditEvents, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [auditEvents.tenantId],
+    references: [tenants.id],
+  }),
+  actor: one(user, {
+    fields: [auditEvents.actorUserId],
+    references: [user.id],
+  }),
+}));
+
 export const productsRelations = relations(products, ({ one }) => ({
   tenant: one(tenants, {
     fields: [products.tenantId],
@@ -267,5 +322,7 @@ export type TenantMembership = typeof tenantMemberships.$inferSelect;
 export type NewTenantMembership = typeof tenantMemberships.$inferInsert;
 export type TenantInvitation = typeof tenantInvitations.$inferSelect;
 export type NewTenantInvitation = typeof tenantInvitations.$inferInsert;
+export type AuditEvent = typeof auditEvents.$inferSelect;
+export type NewAuditEvent = typeof auditEvents.$inferInsert;
 export type Product = typeof products.$inferSelect;
 export type NewProduct = typeof products.$inferInsert;
