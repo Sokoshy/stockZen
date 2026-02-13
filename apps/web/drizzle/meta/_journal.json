@@ -55,6 +55,12 @@
       "when": 1770983200000,
       "tag": "0008_audit_target_id_text",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "when": 1770987000000,
+      "tag": "0009_products_security_hardening",
+      "breakpoints": true
     }
   ]
 }
