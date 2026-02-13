@@ -18,7 +18,46 @@ export function createTestDb() {
 export async function cleanDatabase(db: ReturnType<typeof createTestDb>) {
   const client = await db.$client;
 
+  await client.unsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'audit_action_type') THEN
+        CREATE TYPE audit_action_type AS ENUM (
+          'login',
+          'logout',
+          'password_reset_completed',
+          'invite_created',
+          'invite_revoked',
+          'role_changed',
+          'member_removed',
+          'login_failed',
+          'forbidden_attempt'
+        );
+      END IF;
+
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'audit_status') THEN
+        CREATE TYPE audit_status AS ENUM ('success', 'failure');
+      END IF;
+    END
+    $$;
+  `);
+
+  await client.unsafe(`
+    CREATE TABLE IF NOT EXISTS "audit_events" (
+      "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      "tenant_id" uuid NOT NULL REFERENCES "tenants"("id") ON DELETE CASCADE,
+      "actor_user_id" text,
+      "action_type" audit_action_type NOT NULL,
+      "target_type" varchar(100),
+      "target_id" text,
+      "status" audit_status NOT NULL,
+      "context" text,
+      "created_at" timestamp with time zone DEFAULT now() NOT NULL
+    );
+  `);
+
   const tablesInDeleteOrder = [
+    "audit_events",
     "products",
     "tenant_invitations",
     "tenant_memberships",
@@ -44,10 +83,11 @@ export async function cleanDatabase(db: ReturnType<typeof createTestDb>) {
 }
 
 // Generate unique test data
-export function generateTestEmail() {
-  return `test-${Date.now()}-${Math.random().toString(36).substring(7)}@example.com`;
+export function generateTestEmail(prefix?: string) {
+  const uniqueId = `${Date.now()}-${Math.random().toString(36).substring(7)}`;
+  return `test-${prefix ? `${prefix}-` : ""}${uniqueId}@example.com`;
 }
 
-export function generateTestTenantName() {
-  return `Test Org ${Date.now()}`;
+export function generateTestTenantName(prefix?: string) {
+  return `Test Org ${prefix ? `${prefix} ` : ""}${Date.now()}`;
 }

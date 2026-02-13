@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { AuditEventsTable } from "~/features/auth/components/audit-events-table";
 import { InviteUserForm } from "~/features/auth/components/invite-user-form";
 import { PendingInvitationsTable } from "~/features/auth/components/pending-invitations-table";
 import { TeamMembersTable } from "~/features/auth/components/team-members-table";
@@ -60,6 +61,16 @@ export default async function TeamPage() {
           <h2 className="mb-4 text-lg font-semibold text-gray-900">Team Members</h2>
           <TeamMembersTable />
         </div>
+
+        {canManage ? (
+          <div className="rounded-lg bg-white p-6 shadow">
+            <h2 className="mb-4 text-lg font-semibold text-gray-900">Audit Logs</h2>
+            <p className="mb-4 text-sm text-gray-600">
+              View security-relevant actions performed in your tenant.
+            </p>
+            <AuditEventsTable canView={canManage} />
+          </div>
+        ) : null}
       </div>
     </div>
   );
