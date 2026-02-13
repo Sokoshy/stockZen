@@ -133,6 +133,9 @@ describe("Products RBAC", () => {
     const { caller: adminCaller } = await createProtectedCaller(admin.cookie, admin.ip);
     const created = await adminCaller.products.create({
       name: "Flour",
+      category: "Raw Materials",
+      unit: "kg",
+      barcode: "FLOUR-001",
       price: 42,
       purchasePrice: 21,
       quantity: 10,
@@ -145,7 +148,17 @@ describe("Products RBAC", () => {
     expect(listResult.actorRole).toBe("Operator");
     expect(listResult.products.length).toBeGreaterThan(0);
     expect(listResult.products[0]).not.toHaveProperty("purchasePrice");
+    expect(listResult.products[0]).toMatchObject({
+      category: "Raw Materials",
+      unit: "kg",
+      barcode: "FLOUR-001",
+    });
     expect(detailResult).not.toHaveProperty("purchasePrice");
+    expect(detailResult).toMatchObject({
+      category: "Raw Materials",
+      unit: "kg",
+      barcode: "FLOUR-001",
+    });
   });
 
   it("returns purchasePrice for Admin and Manager in the same tenant", async () => {
@@ -158,6 +171,9 @@ describe("Products RBAC", () => {
     const { caller: adminCaller } = await createProtectedCaller(admin.cookie, admin.ip);
     const created = await adminCaller.products.create({
       name: "Butter",
+      category: "Dairy",
+      unit: "kg",
+      barcode: "BUTTER-001",
       price: 30,
       purchasePrice: 18,
       quantity: 5,
@@ -166,10 +182,20 @@ describe("Products RBAC", () => {
     const adminList = await adminCaller.products.list();
     expect(adminList.actorRole).toBe("Admin");
     expect(adminList.products[0]).toHaveProperty("purchasePrice");
+    expect(adminList.products[0]).toMatchObject({
+      category: "Dairy",
+      unit: "kg",
+      barcode: "BUTTER-001",
+    });
 
     const { caller: managerCaller } = await createProtectedCaller(manager.cookie, manager.ip);
     const managerDetail = await managerCaller.products.getById({ id: created.id as string });
     expect(managerDetail).toHaveProperty("purchasePrice");
+    expect(managerDetail).toMatchObject({
+      category: "Dairy",
+      unit: "kg",
+      barcode: "BUTTER-001",
+    });
   });
 
   it("prevents cross-tenant product access", async () => {
@@ -179,6 +205,9 @@ describe("Products RBAC", () => {
     const { caller: adminACaller } = await createProtectedCaller(adminA.cookie, adminA.ip);
     const created = await adminACaller.products.create({
       name: "Milk",
+      category: "Dairy",
+      unit: "L",
+      barcode: "MILK-001",
       price: 12,
       purchasePrice: 9,
       quantity: 4,
@@ -204,6 +233,9 @@ describe("Products RBAC", () => {
     const { caller: operatorCaller } = await createProtectedCaller(operator.cookie, operator.ip);
     const operatorCreated = await operatorCaller.products.create({
       name: "Sugar",
+      category: "Raw Materials",
+      unit: "kg",
+      barcode: "SUGAR-001",
       price: 7,
       purchasePrice: 4,
       quantity: 1,
@@ -219,6 +251,9 @@ describe("Products RBAC", () => {
     const { caller: adminCaller } = await createProtectedCaller(admin.cookie, admin.ip);
     const adminCreated = await adminCaller.products.create({
       name: "Salt",
+      category: "Raw Materials",
+      unit: "kg",
+      barcode: "SALT-001",
       price: 5,
       purchasePrice: 3,
       quantity: 8,
@@ -243,6 +278,9 @@ describe("Products RBAC", () => {
 
     const created = await adminCaller.products.create({
       name: "Cocoa",
+      category: "Raw Materials",
+      unit: "kg",
+      barcode: "COCOA-001",
       price: 14,
       purchasePrice: 9,
       quantity: 6,

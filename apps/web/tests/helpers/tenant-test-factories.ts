@@ -227,9 +227,16 @@ export async function attemptCrossTenantWrite(
 
 export async function createProductInTenant(
   caller: ReturnType<typeof createCaller>,
-  productData: { name: string; price: number; quantity: number; purchasePrice?: number }
+  productData: { name: string; price: number; quantity: number; purchasePrice?: number; category?: string; unit?: string }
 ): Promise<string> {
-  const result = await caller.products.create(productData);
+  const result = await caller.products.create({
+    name: productData.name,
+    price: productData.price,
+    quantity: productData.quantity,
+    category: productData.category ?? "Test Category",
+    unit: productData.unit ?? "pcs",
+    ...(productData.purchasePrice !== undefined && { purchasePrice: productData.purchasePrice }),
+  });
   return result.id as string;
 }
 
