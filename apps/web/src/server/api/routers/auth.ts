@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { and, eq, gt, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
 
 import {
   loginResponseSchema,
@@ -11,6 +11,10 @@ import {
   signUpResponseSchema,
   signUpSchema,
 } from "~/schemas/auth";
+import {
+  listAuditEventsInputSchema,
+  listAuditEventsOutputSchema,
+} from "~/schemas/audit-events";
 import {
   listTenantMembersOutputSchema,
   removeTenantMemberInputSchema,
@@ -55,9 +59,17 @@ import {
 } from "~/server/better-auth/password-reset-errors";
 import { db as rootDb } from "~/server/db";
 import { setInvitationTokenContext, setTenantContext } from "~/server/db/rls";
-import { session, tenantInvitations, tenantMemberships, tenants, user } from "~/server/db/schema";
+import {
+  session,
+  tenantInvitations,
+  tenantMemberships,
+  tenants,
+  user,
+  verification,
+} from "~/server/db/schema";
 import { logger } from "~/server/logger";
 import { getClientIp, rateLimit } from "~/server/rate-limit";
+import { createAuditEvent } from "~/server/services/audit-service";
 
 const DEFAULT_SESSION_TTL_SECONDS = 60 * 30;
 const REMEMBER_ME_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
@@ -134,6 +146,73 @@ function assertTenantId(tenantId: string | null): string {
   }
 
   return tenantId;
+}
+
+async function getUserAuditContextByEmail(input: {
+  email: string;
+  db: Pick<typeof rootDb, "query">;
+}) {
+  const normalizedEmail = input.email.trim().toLowerCase();
+
+  const userRecord = await input.db.query.user.findFirst({
+    columns: {
+      id: true,
+      defaultTenantId: true,
+    },
+    where: sql`lower(${user.email}) = ${normalizedEmail}`,
+  });
+
+  return {
+    userId: userRecord?.id ?? null,
+    tenantId: userRecord?.defaultTenantId ?? null,
+  };
+}
+
+async function getUserAuditContextFromPasswordResetToken(input: {
+  token: string;
+  db: Pick<typeof rootDb, "query">;
+}) {
+  const verificationRecord = await input.db.query.verification.findFirst({
+    columns: {
+      identifier: true,
+      expiresAt: true,
+    },
+    where: eq(verification.value, input.token),
+  });
+
+  if (!verificationRecord || verificationRecord.expiresAt < new Date()) {
+    return { userId: null, tenantId: null };
+  }
+
+  const identifier = verificationRecord.identifier.trim();
+  const identifierTail = identifier.includes(":")
+    ? identifier.split(":").at(-1)?.trim() ?? identifier
+    : identifier;
+
+  const byId = await input.db.query.user.findFirst({
+    columns: {
+      id: true,
+      defaultTenantId: true,
+    },
+    where: eq(user.id, identifierTail),
+  });
+
+  if (byId?.defaultTenantId) {
+    return { userId: byId.id, tenantId: byId.defaultTenantId };
+  }
+
+  const byEmail = await input.db.query.user.findFirst({
+    columns: {
+      id: true,
+      defaultTenantId: true,
+    },
+    where: sql`lower(${user.email}) = ${identifierTail.toLowerCase()}`,
+  });
+
+  return {
+    userId: byEmail?.id ?? null,
+    tenantId: byEmail?.defaultTenantId ?? null,
+  };
 }
 
 async function getCurrentTenantMembershipOrThrow(input: {
@@ -481,6 +560,15 @@ export const authRouter = createTRPCRouter({
           "User login succeeded"
         );
 
+        // Persist audit event
+        await createAuditEvent({
+          tenantId: userRecord.defaultTenantId,
+          actorUserId: userRecord.id,
+          actionType: "login",
+          status: "success",
+          context: JSON.stringify({ rememberMe, clientIp }),
+        });
+
         return {
           success: true,
           message: "Login successful",
@@ -503,6 +591,30 @@ export const authRouter = createTRPCRouter({
           },
           "User login failed"
         );
+
+        const failedLoginUser = await getUserAuditContextByEmail({
+          email,
+          db: ctx.db,
+        });
+
+        if (failedLoginUser.tenantId) {
+          await createAuditEvent({
+            tenantId: failedLoginUser.tenantId,
+            actorUserId: failedLoginUser.userId,
+            actionType: "login_failed",
+            status: "failure",
+            context: JSON.stringify({ clientIp, reason: "invalid_credentials" }),
+          });
+        } else {
+          logger.warn(
+            {
+              event: "audit.auth.login.failed.no_tenant_context",
+              clientIp,
+              email,
+            },
+            "Skipping persistent failed-login audit event because tenant context is unknown"
+          );
+        }
 
         throw new TRPCError({
           code: "UNAUTHORIZED",
@@ -640,6 +752,29 @@ export const authRouter = createTRPCRouter({
         "Password reset submit succeeded"
       );
 
+      const passwordResetUser = await getUserAuditContextFromPasswordResetToken({
+        token: input.token,
+        db: ctx.db,
+      });
+
+      if (passwordResetUser.tenantId) {
+        await createAuditEvent({
+          tenantId: passwordResetUser.tenantId,
+          actorUserId: passwordResetUser.userId,
+          actionType: "password_reset_completed",
+          status: "success",
+          context: JSON.stringify({ clientIp }),
+        });
+      } else {
+        logger.warn(
+          {
+            event: "audit.auth.password_reset.submit.no_tenant_context",
+            clientIp,
+          },
+          "Skipping persistent password-reset audit event because tenant context is unknown"
+        );
+      }
+
       return {
         success: true,
         message: PASSWORD_RESET_SUCCESS_MESSAGE,
@@ -692,6 +827,23 @@ export const authRouter = createTRPCRouter({
       },
       "User logged out"
     );
+
+    // Persist audit event if we have a userId
+    if (logoutUserId) {
+      const userRecord = await ctx.db.query.user.findFirst({
+        where: eq(user.id, logoutUserId),
+        columns: { defaultTenantId: true },
+      });
+
+      if (userRecord?.defaultTenantId) {
+        await createAuditEvent({
+          tenantId: userRecord.defaultTenantId,
+          actorUserId: logoutUserId,
+          actionType: "logout",
+          status: "success",
+        });
+      }
+    }
 
     return {
       success: true,
@@ -772,6 +924,21 @@ export const authRouter = createTRPCRouter({
             },
             "Forbidden role update attempt"
           );
+
+          // Persist audit event for forbidden attempt
+          await createAuditEvent({
+            tenantId,
+            actorUserId: ctx.session.user.id,
+            actionType: "forbidden_attempt",
+            targetType: "user",
+            targetId: input.memberUserId,
+            status: "failure",
+            context: JSON.stringify({
+              action: "role_update",
+              actorRole: actorMembership.role,
+              requestedRole: input.role,
+            }),
+          });
 
           throw new TRPCError({
             code: "FORBIDDEN",
@@ -869,6 +1036,20 @@ export const authRouter = createTRPCRouter({
           },
           "Member role updated"
         );
+
+        // Persist audit event
+        await createAuditEvent({
+          tenantId,
+          actorUserId: ctx.session.user.id,
+          actionType: "role_changed",
+          targetType: "user",
+          targetId: mutationResult.targetUserId,
+          status: "success",
+          context: JSON.stringify({
+            previousRole: mutationResult.previousRole,
+            nextRole: mutationResult.nextRole,
+          }),
+        });
       }
 
       return {
@@ -904,6 +1085,20 @@ export const authRouter = createTRPCRouter({
           },
           "Forbidden member removal attempt"
         );
+
+        // Persist audit event for forbidden attempt
+        await createAuditEvent({
+          tenantId,
+          actorUserId: ctx.session.user.id,
+          actionType: "forbidden_attempt",
+          targetType: "user",
+          targetId: input.memberUserId,
+          status: "failure",
+          context: JSON.stringify({
+            action: "member_remove",
+            actorRole: actorMembership.role,
+          }),
+        });
 
         throw new TRPCError({
           code: "FORBIDDEN",
@@ -1086,6 +1281,21 @@ export const authRouter = createTRPCRouter({
         "Member removed from tenant"
       );
 
+      // Persist audit event
+      await createAuditEvent({
+        tenantId,
+        actorUserId: ctx.session.user.id,
+        actionType: "member_removed",
+        targetType: "user",
+        targetId: removalResult.targetUserId,
+        status: "success",
+        context: JSON.stringify({
+          targetRole: removalResult.targetRole,
+          isSelfRemoval,
+          sessionsInvalidated: removalResult.sessionsInvalidated,
+        }),
+      });
+
       return {
         success: true,
         message: isSelfRemoval
@@ -1181,6 +1391,19 @@ export const authRouter = createTRPCRouter({
           },
           "Forbidden invitation creation attempt"
         );
+
+        // Persist audit event for forbidden attempt
+        await createAuditEvent({
+          tenantId,
+          actorUserId: ctx.session.user.id,
+          actionType: "forbidden_attempt",
+          status: "failure",
+          context: JSON.stringify({
+            action: "invitation_create",
+            actorRole: actorMembership.role,
+            targetEmail: input.email,
+          }),
+        });
 
         throw new TRPCError({
           code: "FORBIDDEN",
@@ -1314,6 +1537,17 @@ export const authRouter = createTRPCRouter({
         "Invitation created and email queued"
       );
 
+      // Persist audit event
+      await createAuditEvent({
+        tenantId,
+        actorUserId: ctx.session.user.id,
+        actionType: "invite_created",
+        targetType: "invitation",
+        targetId: invitation.id,
+        status: "success",
+        context: JSON.stringify({ targetEmail: normalizedEmail, targetRole: input.role }),
+      });
+
       return {
         success: true,
         message: "Invitation created successfully.",
@@ -1357,6 +1591,19 @@ export const authRouter = createTRPCRouter({
           },
           "Forbidden invitation revocation attempt"
         );
+
+        // Persist audit event for forbidden attempt
+        await createAuditEvent({
+          tenantId,
+          actorUserId: ctx.session.user.id,
+          actionType: "forbidden_attempt",
+          status: "failure",
+          context: JSON.stringify({
+            action: "invitation_revoke",
+            actorRole: actorMembership.role,
+            invitationId: input.invitationId,
+          }),
+        });
 
         throw new TRPCError({
           code: "FORBIDDEN",
@@ -1407,6 +1654,17 @@ export const authRouter = createTRPCRouter({
         },
         "Invitation revoked successfully"
       );
+
+      // Persist audit event
+      await createAuditEvent({
+        tenantId,
+        actorUserId: ctx.session.user.id,
+        actionType: "invite_revoked",
+        targetType: "invitation",
+        targetId: input.invitationId,
+        status: "success",
+        context: JSON.stringify({ targetEmail: invitation.email }),
+      });
 
       return {
         success: true,
@@ -1766,6 +2024,75 @@ export const authRouter = createTRPCRouter({
         success: true,
         message: "Invitation accepted successfully. You can now sign in.",
         redirectTo: "/login",
+      };
+    }),
+
+  /**
+   * List audit events for the current tenant.
+   * Admin-only.
+   */
+  listAuditEvents: protectedProcedure
+    .input(listAuditEventsInputSchema)
+    .output(listAuditEventsOutputSchema)
+    .query(async ({ ctx, input }) => {
+      const tenantId = assertTenantId(ctx.tenantId);
+      const actorMembership = await getCurrentTenantMembershipOrThrow({
+        tenantId,
+        userId: ctx.session.user.id,
+        db: ctx.db,
+      });
+
+      if (actorMembership.role !== "Admin") {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only Admins can view audit logs.",
+        });
+      }
+
+      const limit = input.limit ?? 20;
+      const cursor = input.cursor;
+      const cursorCreatedAt = cursor ? new Date(cursor.createdAt) : null;
+
+      const events = await ctx.db.query.auditEvents.findMany({
+        where: cursor && cursorCreatedAt
+          ? (auditEvents, { and, eq, lt }) =>
+              and(
+                eq(auditEvents.tenantId, tenantId),
+                or(
+                  lt(auditEvents.createdAt, cursorCreatedAt),
+                  and(eq(auditEvents.createdAt, cursorCreatedAt), lt(auditEvents.id, cursor.id))
+                )
+              )
+          : (auditEvents, { eq }) => eq(auditEvents.tenantId, tenantId),
+        orderBy: (auditEvents, { desc }) => [desc(auditEvents.createdAt), desc(auditEvents.id)],
+        limit: limit + 1,
+      });
+
+      let nextCursor: { createdAt: string; id: string } | null = null;
+      if (events.length > limit) {
+        const nextEvent = events[limit - 1];
+        if (nextEvent) {
+          nextCursor = {
+            createdAt: nextEvent.createdAt.toISOString(),
+            id: nextEvent.id,
+          };
+        }
+        events.pop();
+      }
+
+      return {
+        events: events.map((event) => ({
+          id: event.id,
+          tenantId: event.tenantId,
+          actorUserId: event.actorUserId,
+          actionType: event.actionType,
+          targetType: event.targetType,
+          targetId: event.targetId,
+          status: event.status,
+          context: event.context,
+          createdAt: event.createdAt.toISOString(),
+        })),
+        nextCursor,
       };
     }),
 });
