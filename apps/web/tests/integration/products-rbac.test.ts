@@ -236,4 +236,31 @@ describe("Products RBAC", () => {
     });
     expect(updatedRow?.purchasePrice).toBe("3.00");
   });
+
+  it("allows Admin to clear purchasePrice by setting null", async () => {
+    const admin = await signUpUser();
+    const { caller: adminCaller } = await createProtectedCaller(admin.cookie, admin.ip);
+
+    const created = await adminCaller.products.create({
+      name: "Cocoa",
+      price: 14,
+      purchasePrice: 9,
+      quantity: 6,
+    });
+
+    const updated = await adminCaller.products.update({
+      id: created.id as string,
+      data: {
+        purchasePrice: null,
+      },
+    });
+
+    expect(updated).toHaveProperty("purchasePrice", null);
+
+    const updatedRow = await testDb.query.products.findFirst({
+      where: and(eq(products.id, created.id as string), eq(products.tenantId, admin.tenantId)),
+    });
+
+    expect(updatedRow?.purchasePrice).toBeNull();
+  });
 });

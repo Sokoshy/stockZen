@@ -20,12 +20,12 @@ export type Product = z.infer<typeof productSchema>;
 // Input schema for creating/updating products
 export const productInputSchema = z.object({
   name: z.string().min(1).max(255),
-  description: z.string().max(1000).optional(),
-  sku: z.string().min(1).max(100).optional(),
+  description: z.string().max(1000).nullable().optional(),
+  sku: z.string().min(1).max(100).nullable().optional(),
   price: z.number().nonnegative(),
-  purchasePrice: z.number().nonnegative().optional(),
+  purchasePrice: z.number().nonnegative().nullable().optional(),
   quantity: z.number().int().nonnegative().optional(),
-  lowStockThreshold: z.number().int().nonnegative().optional(),
+  lowStockThreshold: z.number().int().nonnegative().nullable().optional(),
 });
 
 export type ProductInput = z.infer<typeof productInputSchema>;

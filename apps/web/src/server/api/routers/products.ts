@@ -13,6 +13,7 @@ import {
   serializeProductForRole,
   serializeProductsForRole,
 } from "~/server/auth/product-serializer";
+import { canWritePurchasePrice } from "~/server/auth/rbac-policy";
 import { products } from "~/server/db/schema";
 import { logger } from "~/server/logger";
 
@@ -136,6 +137,19 @@ export const productsRouter = createTRPCRouter({
 
       const role = membership.role;
 
+      if (!canWritePurchasePrice(role) && Object.prototype.hasOwnProperty.call(input, "purchasePrice")) {
+        logger.warn(
+          {
+            event: "audit.products.purchase_price.write_blocked",
+            userId,
+            tenantId,
+            role,
+            operation: "create",
+          },
+          "Blocked purchasePrice write attempt"
+        );
+      }
+
       const sanitizedInput = sanitizeProductInputForRole(input, role);
       const fullInput = sanitizedInput as typeof input;
 
@@ -191,6 +205,20 @@ export const productsRouter = createTRPCRouter({
 
       const role = membership.role;
 
+      if (!canWritePurchasePrice(role) && Object.prototype.hasOwnProperty.call(input.data, "purchasePrice")) {
+        logger.warn(
+          {
+            event: "audit.products.purchase_price.write_blocked",
+            userId,
+            tenantId,
+            role,
+            operation: "update",
+            productId: input.id,
+          },
+          "Blocked purchasePrice write attempt"
+        );
+      }
+
       const existingProduct = await ctx.db.query.products.findFirst({
         where: (p, { and: andExpr, eq: eqExpr }) =>
           andExpr(eqExpr(p.id, input.id), eqExpr(p.tenantId, tenantId)),
@@ -217,8 +245,9 @@ export const productsRouter = createTRPCRouter({
       if (fullData.lowStockThreshold !== undefined) {
         updateData.lowStockThreshold = fullData.lowStockThreshold;
       }
-      if (fullData.purchasePrice !== undefined && fullData.purchasePrice !== null) {
-        updateData.purchasePrice = fullData.purchasePrice.toString();
+      if (fullData.purchasePrice !== undefined) {
+        updateData.purchasePrice =
+          fullData.purchasePrice === null ? null : fullData.purchasePrice.toString();
       }
 
       const [updatedProduct] = await ctx.db
