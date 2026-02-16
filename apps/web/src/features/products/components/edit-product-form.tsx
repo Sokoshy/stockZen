@@ -29,15 +29,17 @@ interface EditProductFormProps {
   };
   tenantId: string;
   canWritePurchasePrice: boolean;
+  serverAvailable?: boolean;
 }
 
 export function EditProductForm({
   product,
   tenantId,
   canWritePurchasePrice,
+  serverAvailable = true,
 }: EditProductFormProps) {
   const router = useRouter();
-  const [isOffline, setIsOffline] = useState(false);
+  const [isOffline, setIsOffline] = useState(!serverAvailable);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -74,7 +76,7 @@ export function EditProductForm({
     setSuccess(null);
 
     try {
-      if (isOffline) {
+      if (isOffline || !serverAvailable) {
         await updateProductOffline({
           id: product.id,
           tenantId,
@@ -242,7 +244,10 @@ export function EditProductForm({
             SKU (optional)
           </label>
           <input
-            {...register("sku")}
+            {...register("sku", {
+              setValueAs: (value) =>
+                typeof value === "string" && value.trim() === "" ? null : value,
+            })}
             type="text"
             id="sku"
             className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -284,9 +289,14 @@ export function EditProductForm({
             type="checkbox"
             checked={isOffline}
             onChange={(e) => setIsOffline(e.target.checked)}
+            disabled={!serverAvailable}
             className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
           />
-          <span className="text-sm text-gray-600">Save offline (no server sync)</span>
+          <span className="text-sm text-gray-600">
+            {serverAvailable
+              ? "Save offline (no server sync)"
+              : "Offline-only product (will sync later)"}
+          </span>
         </label>
       </div>
     </form>
