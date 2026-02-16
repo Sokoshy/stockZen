@@ -55,7 +55,7 @@ development_status:
   epic-2: in-progress
   2-1-create-product-offline-first: done
   2-2-edit-delete-products-product-list-filters-offline-first: done
-  2-3-record-stock-entry-exit-offline-3-click-loop: backlog
+  2-3-record-stock-entry-exit-offline-3-click-loop: done
   2-4-movement-history-per-product-newest-first-infinite-scroll: backlog
   2-5-auto-sync-engine-sync-status-offline-queue-lww-conflicts: backlog
   epic-2-retrospective: optional
