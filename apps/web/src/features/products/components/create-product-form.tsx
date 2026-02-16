@@ -245,7 +245,10 @@ export function CreateProductForm({ tenantId, canWritePurchasePrice }: CreatePro
             SKU (optional)
           </label>
           <input
-            {...register("sku")}
+            {...register("sku", {
+              setValueAs: (value) =>
+                typeof value === "string" && value.trim() === "" ? null : value,
+            })}
             type="text"
             id="sku"
             className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"

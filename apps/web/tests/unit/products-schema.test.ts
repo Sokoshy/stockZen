@@ -122,5 +122,6 @@ describe("productInputSchema validation", () => {
       });
       expect(result.success).toBe(true);
     });
+
   });
 });
