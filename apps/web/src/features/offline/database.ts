@@ -16,6 +16,7 @@ export interface LocalProduct {
   syncStatus: "pending" | "synced" | "failed";
   createdAt: string;
   updatedAt: string;
+  deletedAt: string | null;
 }
 
 export interface OutboxOperation {
@@ -43,7 +44,13 @@ db.version(1).stores({
 });
 
 db.version(2).stores({
-  products: "id, tenantId, syncStatus, category, barcode, [tenantId+syncStatus]",
+  products: "id, tenantId, syncStatus, category, barcode, [tenantId+syncStatus], deletedAt",
+  outbox:
+    "id, operationId, entityType, entityId, status, createdAt, [entityType+entityId], [entityType+operationId]",
+});
+
+db.version(3).stores({
+  products: "id, tenantId, syncStatus, category, barcode, [tenantId+syncStatus], deletedAt",
   outbox:
     "id, operationId, entityType, entityId, status, createdAt, [entityType+entityId], [entityType+operationId]",
 });

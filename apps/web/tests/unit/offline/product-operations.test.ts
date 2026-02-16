@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { addProductMock, enqueueOperationMock } = vi.hoisted(() => ({
+const { addProductMock, enqueueOperationMock, transactionMock } = vi.hoisted(() => ({
   addProductMock: vi.fn(),
   enqueueOperationMock: vi.fn(),
+  transactionMock: vi.fn(async (...args: unknown[]) => {
+    const callback = args[args.length - 1] as () => Promise<unknown>;
+    return callback();
+  }),
 }));
 
 vi.mock("~/features/offline/database", () => ({
@@ -10,6 +14,8 @@ vi.mock("~/features/offline/database", () => ({
     products: {
       add: addProductMock,
     },
+    outbox: {},
+    transaction: transactionMock,
   },
 }));
 
@@ -23,6 +29,7 @@ describe("createProductOffline", () => {
   beforeEach(() => {
     addProductMock.mockReset();
     enqueueOperationMock.mockReset();
+    transactionMock.mockClear();
   });
 
   it("creates a local pending product and enqueues idempotent outbox payload", async () => {
@@ -45,6 +52,7 @@ describe("createProductOffline", () => {
     });
 
     expect(addProductMock).toHaveBeenCalledTimes(1);
+    expect(transactionMock).toHaveBeenCalledTimes(1);
     expect(addProductMock).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "local-product-id",
@@ -68,6 +76,7 @@ describe("createProductOffline", () => {
         entityId: "local-product-id",
         payload: expect.objectContaining({
           operationId: "operation-id-001",
+          tenantId: "tenant-1",
           name: "Flour",
           category: "Baking",
           unit: "kg",
