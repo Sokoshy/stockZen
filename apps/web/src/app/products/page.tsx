@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { ProductsTable } from "~/features/products/components/products-table";
+import { ProductsListClient } from "~/features/products/components/products-list-client";
 import { getSession } from "~/server/better-auth/server";
 import { api } from "~/trpc/server";
 
@@ -32,7 +32,7 @@ export default async function ProductsPage() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-gray-900">Products</h1>
             <p className="mt-1 text-sm text-gray-600">
-              Role-aware product list with secure purchase price visibility.
+              Browse and filter products with offline-first capabilities.
             </p>
           </div>
 
@@ -53,8 +53,8 @@ export default async function ProductsPage() {
           </div>
         </div>
 
-        <ProductsTable
-          products={data.products}
+        <ProductsListClient
+          serverProducts={data.products}
           actorRole={data.actorRole}
           tenantId={membership.tenantId}
         />
