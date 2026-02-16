@@ -16,6 +16,7 @@ export const productSchema = z.object({
   lowStockThreshold: z.number().int().nonnegative().nullable(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
+  deletedAt: z.string().datetime().nullable(),
 });
 
 export type Product = z.infer<typeof productSchema>;

@@ -212,6 +212,7 @@ export const products = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .$defaultFn(() => new Date())
       .notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
   (table) => [
     index("idx_products_tenant_id").on(table.tenantId),

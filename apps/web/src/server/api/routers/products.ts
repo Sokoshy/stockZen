@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import {
@@ -31,6 +31,7 @@ const operatorProductColumns = {
   lowStockThreshold: products.lowStockThreshold,
   createdAt: products.createdAt,
   updatedAt: products.updatedAt,
+  deletedAt: products.deletedAt,
 };
 
 export const productsRouter = createTRPCRouter({
@@ -57,10 +58,11 @@ export const productsRouter = createTRPCRouter({
         ? await ctx.db
             .select(operatorProductColumns)
             .from(products)
-            .where(eq(products.tenantId, tenantId))
+            .where(and(eq(products.tenantId, tenantId), isNull(products.deletedAt)))
             .orderBy(desc(products.createdAt))
         : await ctx.db.query.products.findMany({
-            where: eq(products.tenantId, tenantId),
+            where: (p, { and: andExpr, eq: eqExpr, isNull: isNullExpr }) =>
+              andExpr(eqExpr(p.tenantId, tenantId), isNullExpr(p.deletedAt)),
             orderBy: desc(products.createdAt),
           });
 
@@ -99,12 +101,22 @@ export const productsRouter = createTRPCRouter({
               await ctx.db
                 .select(operatorProductColumns)
                 .from(products)
-                .where(and(eq(products.id, input.id), eq(products.tenantId, tenantId)))
+                .where(
+                  and(
+                    eq(products.id, input.id),
+                    eq(products.tenantId, tenantId),
+                    isNull(products.deletedAt)
+                  )
+                )
                 .limit(1)
             )[0]
           : await ctx.db.query.products.findFirst({
-              where: (p, { and: andExpr, eq: eqExpr }) =>
-                andExpr(eqExpr(p.id, input.id), eqExpr(p.tenantId, tenantId)),
+              where: (p, { and: andExpr, eq: eqExpr, isNull: isNullExpr }) =>
+                andExpr(
+                  eqExpr(p.id, input.id),
+                  eqExpr(p.tenantId, tenantId),
+                  isNullExpr(p.deletedAt)
+                ),
             });
 
       if (!product) {
@@ -298,8 +310,12 @@ export const productsRouter = createTRPCRouter({
       const role = membership.role;
 
       const existingProduct = await ctx.db.query.products.findFirst({
-        where: (p, { and: andExpr, eq: eqExpr }) =>
-          andExpr(eqExpr(p.id, input.id), eqExpr(p.tenantId, tenantId)),
+        where: (p, { and: andExpr, eq: eqExpr, isNull: isNullExpr }) =>
+          andExpr(
+            eqExpr(p.id, input.id),
+            eqExpr(p.tenantId, tenantId),
+            isNullExpr(p.deletedAt)
+          ),
       });
 
       if (!existingProduct) {
@@ -310,7 +326,11 @@ export const productsRouter = createTRPCRouter({
       }
 
       await ctx.db
-        .delete(products)
+        .update(products)
+        .set({
+          deletedAt: new Date(),
+          updatedAt: new Date(),
+        })
         .where(and(eq(products.id, input.id), eq(products.tenantId, tenantId)));
 
       logger.info({ userId, tenantId, role, productId: input.id }, "Product deleted");
