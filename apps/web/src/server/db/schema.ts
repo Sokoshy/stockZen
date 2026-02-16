@@ -224,6 +224,41 @@ export const products = pgTable(
 );
 
 // ============================================
+// Stock Movements Table
+// ============================================
+
+export const movementTypeEnum = pgEnum("movement_type", ["entry", "exit"]);
+
+export const stockMovements = pgTable(
+  "stock_movements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    type: movementTypeEnum("type").notNull(),
+    quantity: integer("quantity").notNull(),
+    idempotencyKey: varchar("idempotency_key", { length: 255 }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .$defaultFn(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("idx_stock_movements_tenant_id").on(table.tenantId),
+    index("idx_stock_movements_product_id").on(table.productId),
+    index("idx_stock_movements_tenant_product").on(table.tenantId, table.productId),
+    index("idx_stock_movements_created_at").on(table.createdAt),
+    index("idx_stock_movements_idempotency").on(table.tenantId, table.idempotencyKey),
+  ]
+);
+
+// ============================================
 // Example/Demo Table (can be removed later)
 // ============================================
 
@@ -313,6 +348,21 @@ export const productsRelations = relations(products, ({ one }) => ({
   tenant: one(tenants, {
     fields: [products.tenantId],
     references: [tenants.id],
+  }),
+}));
+
+export const stockMovementsRelations = relations(stockMovements, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [stockMovements.tenantId],
+    references: [tenants.id],
+  }),
+  product: one(products, {
+    fields: [stockMovements.productId],
+    references: [products.id],
+  }),
+  user: one(user, {
+    fields: [stockMovements.userId],
+    references: [user.id],
   }),
 }));
 
