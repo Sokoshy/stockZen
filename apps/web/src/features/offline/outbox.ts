@@ -3,7 +3,7 @@ import { db, type OutboxOperation } from "./database";
 export interface EnqueueOperationInput {
   operationId?: string;
   operationType: "create" | "update" | "delete";
-  entityType: "product";
+  entityType: "product" | "stockMovement";
   entityId: string;
   payload: Record<string, unknown>;
 }
