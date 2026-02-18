@@ -119,6 +119,13 @@ export function ProductsTable({
                   <td className="px-3 py-3 text-sm">
                     <div className="flex items-center gap-2">
                       <Link
+                        href={`/products/${product.id}/movements`}
+                        className="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                        aria-label={`View movement history for ${product.name}`}
+                      >
+                        History
+                      </Link>
+                      <Link
                         href={`/products/${product.id}/edit`}
                         className="inline-flex items-center rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
                       >

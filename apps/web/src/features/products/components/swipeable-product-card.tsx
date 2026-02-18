@@ -161,6 +161,38 @@ export function SwipeableProductCard({
       </div>
 
       <div
+        className="absolute inset-y-0 right-0 flex items-center bg-purple-500 px-4"
+        style={{
+          width: `${SWIPE_THRESHOLD}px`,
+          right: `${SWIPE_THRESHOLD * 2}px`,
+          transform: `translateX(${Math.max(0, -translateX)}px)`,
+          transition: isSwiping ? "none" : "transform 0.2s ease-out",
+        }}
+      >
+        <Link
+          href={`/products/${product.id}/movements`}
+          className="flex flex-col items-center gap-1"
+          onClick={closeActions}
+          style={{ minWidth: TOUCH_TARGET_MIN, minHeight: TOUCH_TARGET_MIN }}
+        >
+          <svg
+            className="h-6 w-6 text-white"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+          <span className="text-xs font-medium text-white">History</span>
+        </Link>
+      </div>
+
+      <div
         className="absolute inset-y-0 right-0 flex items-center bg-blue-500 px-4"
         style={{
           width: `${SWIPE_THRESHOLD}px`,
@@ -287,6 +319,20 @@ export function SwipeableProductCard({
 
           {/* Mobile Action Buttons (visible on small screens when not swiping) */}
           <div className="flex flex-col gap-2 sm:hidden">
+            <Link
+              href={`/products/${product.id}/movements`}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-purple-300 bg-white text-purple-700 hover:bg-purple-50 focus:outline-none focus:ring-2 focus:ring-purple-500"
+              aria-label={`View movement history for ${product.name}`}
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+            </Link>
             <Link
               href={`/products/${product.id}/edit`}
               className="inline-flex h-10 w-10 items-center justify-center rounded-md bg-blue-600 text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
