@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { useSearchParams } from "next/navigation";
 
 import { stockMovementSchema } from "~/schemas/stock-movements";
 import {
@@ -28,6 +29,7 @@ interface StockMovementFormProps {
 
 export function StockMovementForm({ tenantId }: StockMovementFormProps) {
   const utils = api.useUtils();
+  const searchParams = useSearchParams();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -58,6 +60,18 @@ export function StockMovementForm({ tenantId }: StockMovementFormProps) {
 
   const selectedProductId = watch("productId");
   const selectedType = watch("type");
+
+  useEffect(() => {
+    const productIdFromQuery = searchParams.get("productId");
+    if (!productIdFromQuery || selectedProductId) {
+      return;
+    }
+
+    const hasProduct = products.some((product) => product.id === productIdFromQuery);
+    if (hasProduct) {
+      setValue("productId", productIdFromQuery, { shouldValidate: true });
+    }
+  }, [products, searchParams, selectedProductId, setValue]);
 
   const loadRecentProducts = useCallback(async () => {
     if (products.length === 0) {
@@ -106,7 +120,10 @@ export function StockMovementForm({ tenantId }: StockMovementFormProps) {
 
     for (const item of pendingItems) {
       try {
-        await markMovementSyncing(item.operationId);
+        await markMovementSyncing({
+          movementId: item.movementId,
+          operationId: item.operationId,
+        });
 
         const response = await createMovementMutation.mutateAsync({
           productId: item.productId,
