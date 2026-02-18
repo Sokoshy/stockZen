@@ -115,19 +115,21 @@ export async function createMovement(
 }
 
 export async function getMovementsByProduct(
-  productId: string
+  input: { productId: string; tenantId: string }
 ): Promise<{
   id: string;
   type: "entry" | "exit";
   quantity: number;
   clientCreatedAt: string;
-  syncStatus: "pending" | "synced" | "failed";
+  syncStatus: "pending" | "processing" | "synced" | "failed";
 }[]> {
-  const movements = await db.stockMovements.where("productId").equals(productId).toArray();
+  const movements = await db.stockMovements.where("productId").equals(input.productId).toArray();
 
-  movements.sort((a, b) => b.clientCreatedAt.localeCompare(a.clientCreatedAt));
+  const tenantMovements = movements.filter((movement) => movement.tenantId === input.tenantId);
 
-  return movements.map((m) => ({
+  tenantMovements.sort((a, b) => b.clientCreatedAt.localeCompare(a.clientCreatedAt));
+
+  return tenantMovements.map((m) => ({
     id: m.id,
     type: m.type,
     quantity: m.quantity,
@@ -244,8 +246,16 @@ export async function getPendingMovementSyncItems(
   return items;
 }
 
-export async function markMovementSyncing(operationId: string): Promise<void> {
-  await markOperationProcessing(operationId);
+export async function markMovementSyncing(input: {
+  movementId: string;
+  operationId: string;
+}): Promise<void> {
+  await db.transaction("rw", db.stockMovements, db.outbox, async () => {
+    await db.stockMovements.update(input.movementId, {
+      syncStatus: "processing",
+    });
+    await markOperationProcessing(input.operationId);
+  });
 }
 
 export async function markMovementSynced(input: {

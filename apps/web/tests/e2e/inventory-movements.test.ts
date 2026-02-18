@@ -19,7 +19,7 @@ type MockMovement = {
   clientCreatedAt: string;
   serverCreatedAt: string | null;
   syncedAt: string | null;
-  syncStatus: "pending" | "synced" | "failed";
+  syncStatus: "pending" | "processing" | "synced" | "failed";
 };
 
 type MockOutbox = {
@@ -192,9 +192,12 @@ vi.mock("~/features/offline/outbox", () => ({
 
 import {
   createMovement,
+  getMovementsByProduct,
   getPendingMovementSyncItems,
   getRecentProductIds,
   markMovementSynced,
+  markMovementSyncFailed,
+  markMovementSyncing,
 } from "~/features/offline/movement-operations";
 
 const TENANT_ID = "00000000-0000-0000-0000-000000000010";
@@ -290,5 +293,180 @@ describe("E2E - Inventory movement offline + sync", () => {
 
     const recentProductIds = await getRecentProductIds(TENANT_ID, 5);
     expect(recentProductIds).toEqual([PRODUCT_ID, product2]);
+  });
+});
+
+describe("E2E - Movement history offline visibility", () => {
+  beforeEach(() => {
+    state.reset();
+    state.products.set(PRODUCT_ID, {
+      id: PRODUCT_ID,
+      tenantId: TENANT_ID,
+      name: "Flour",
+      quantity: 10,
+      syncStatus: "synced",
+      updatedAt: new Date().toISOString(),
+    });
+  });
+
+  it("shows locally created movement immediately in history", async () => {
+    const { movementId } = await createMovement({
+      tenantId: TENANT_ID,
+      productId: PRODUCT_ID,
+      type: "entry",
+      quantity: 5,
+    });
+
+    const movement = state.movements.get(movementId);
+    expect(movement).toBeDefined();
+    expect(movement?.syncStatus).toBe("pending");
+    expect(movement?.type).toBe("entry");
+    expect(movement?.quantity).toBe(5);
+  });
+
+  it("displays pending-sync badge for offline movements", async () => {
+    const { movementId } = await createMovement({
+      tenantId: TENANT_ID,
+      productId: PRODUCT_ID,
+      type: "exit",
+      quantity: 2,
+    });
+
+    const movement = state.movements.get(movementId);
+    expect(movement?.syncStatus).toBe("pending");
+
+    await markMovementSynced({
+      movementId,
+      operationId: movement?.idempotencyKey ?? "",
+    });
+
+    expect(state.movements.get(movementId)?.syncStatus).toBe("synced");
+  });
+
+  it("shows failed sync status for movements that failed to sync", async () => {
+    const { movementId, operationId } = await createMovement({
+      tenantId: TENANT_ID,
+      productId: PRODUCT_ID,
+      type: "entry",
+      quantity: 3,
+    });
+
+    const operation = state.outbox.get(operationId);
+    expect(operation?.status).toBe("pending");
+
+    state.outbox.set(operationId, {
+      ...operation!,
+      status: "failed",
+      error: "Network error",
+    });
+
+    state.movements.set(movementId, {
+      ...state.movements.get(movementId)!,
+      syncStatus: "failed",
+    });
+
+    const failedMovement = state.movements.get(movementId);
+    expect(failedMovement?.syncStatus).toBe("failed");
+  });
+
+  it("filters local movement history by tenant and product", async () => {
+    const now = new Date().toISOString();
+
+    state.movements.set("foreign-movement", {
+      id: "foreign-movement",
+      tenantId: "00000000-0000-0000-0000-000000000099",
+      productId: PRODUCT_ID,
+      type: "entry",
+      quantity: 999,
+      idempotencyKey: "foreign-operation",
+      clientCreatedAt: now,
+      serverCreatedAt: null,
+      syncedAt: null,
+      syncStatus: "pending",
+    });
+
+    const { movementId } = await createMovement({
+      tenantId: TENANT_ID,
+      productId: PRODUCT_ID,
+      type: "entry",
+      quantity: 3,
+    });
+
+    const history = await getMovementsByProduct({
+      tenantId: TENANT_ID,
+      productId: PRODUCT_ID,
+    });
+
+    expect(history.some((movement) => movement.id === "foreign-movement")).toBe(false);
+    expect(history.some((movement) => movement.id === movementId)).toBe(true);
+  });
+
+  it("maintains newest-first order for movements", async () => {
+    await createMovement({
+      tenantId: TENANT_ID,
+      productId: PRODUCT_ID,
+      type: "entry",
+      quantity: 1,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    await createMovement({
+      tenantId: TENANT_ID,
+      productId: PRODUCT_ID,
+      type: "exit",
+      quantity: 1,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    await createMovement({
+      tenantId: TENANT_ID,
+      productId: PRODUCT_ID,
+      type: "entry",
+      quantity: 2,
+    });
+
+    const movements = Array.from(state.movements.values()).sort(
+      (a, b) => new Date(b.clientCreatedAt).getTime() - new Date(a.clientCreatedAt).getTime()
+    );
+
+    expect(movements[0]?.quantity).toBe(2);
+    expect(movements[0]?.type).toBe("entry");
+    expect(movements[1]?.quantity).toBe(1);
+    expect(movements[1]?.type).toBe("exit");
+    expect(movements[2]?.quantity).toBe(1);
+    expect(movements[2]?.type).toBe("entry");
+  });
+
+  it("transitions movement status through sync lifecycle", async () => {
+    const { movementId, operationId } = await createMovement({
+      tenantId: TENANT_ID,
+      productId: PRODUCT_ID,
+      type: "entry",
+      quantity: 10,
+    });
+
+    expect(state.movements.get(movementId)?.syncStatus).toBe("pending");
+
+    const pendingItemsBeforeProcessing = await getPendingMovementSyncItems(TENANT_ID);
+    expect(pendingItemsBeforeProcessing).toHaveLength(1);
+    expect(pendingItemsBeforeProcessing[0]?.movementId).toBe(movementId);
+
+    await markMovementSyncing({
+      movementId,
+      operationId,
+    });
+
+    expect(state.movements.get(movementId)?.syncStatus).toBe("processing");
+    expect(state.outbox.get(operationId)?.status).toBe("processing");
+
+    await markMovementSynced({
+      movementId,
+      operationId,
+    });
+
+    expect(state.movements.get(movementId)?.syncStatus).toBe("synced");
+    expect(state.outbox.get(operationId)?.status).toBe("completed");
   });
 });

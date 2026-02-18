@@ -29,7 +29,7 @@ export interface LocalStockMovement {
   clientCreatedAt: string;
   serverCreatedAt: string | null;
   syncedAt: string | null;
-  syncStatus: "pending" | "synced" | "failed";
+  syncStatus: "pending" | "processing" | "synced" | "failed";
 }
 
 export interface OutboxOperation {
