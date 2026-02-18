@@ -166,4 +166,295 @@ describe("Stock movements API", () => {
 
     expect(movementsWithKey).toHaveLength(1);
   });
+
+  describe("listByProduct pagination", () => {
+    it("returns movements sorted newest-first", async () => {
+      const admin = await createTestTenant();
+      const adminCtx = await createTenantContext(admin);
+
+      const product = await adminCtx.caller.products.create({
+        name: "Test Product",
+        category: "Test",
+        unit: "pcs",
+        price: 10,
+        quantity: 100,
+      });
+
+      await adminCtx.caller.stockMovements.create({
+        productId: product.id,
+        type: "entry",
+        quantity: 10,
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      await adminCtx.caller.stockMovements.create({
+        productId: product.id,
+        type: "exit",
+        quantity: 5,
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      await adminCtx.caller.stockMovements.create({
+        productId: product.id,
+        type: "entry",
+        quantity: 20,
+      });
+
+      const result = await adminCtx.caller.stockMovements.listByProduct({
+        productId: product.id,
+        limit: 10,
+      });
+
+      expect(result.movements).toHaveLength(3);
+      expect(result.movements[0]?.type).toBe("entry");
+      expect(result.movements[0]?.quantity).toBe(20);
+      expect(result.movements[1]?.type).toBe("exit");
+      expect(result.movements[1]?.quantity).toBe(5);
+      expect(result.movements[2]?.type).toBe("entry");
+      expect(result.movements[2]?.quantity).toBe(10);
+
+      for (let i = 0; i < result.movements.length - 1; i++) {
+        const current = result.movements[i];
+        const next = result.movements[i + 1];
+        if (current && next) {
+          expect(new Date(current.createdAt).getTime()).toBeGreaterThanOrEqual(
+            new Date(next.createdAt).getTime()
+          );
+        }
+      }
+    });
+
+    it("supports cursor-based pagination with composite cursor", async () => {
+      const admin = await createTestTenant();
+      const adminCtx = await createTenantContext(admin);
+
+      const product = await adminCtx.caller.products.create({
+        name: "Pagination Product",
+        category: "Test",
+        unit: "pcs",
+        price: 10,
+        quantity: 100,
+      });
+
+      for (let i = 0; i < 5; i++) {
+        await adminCtx.caller.stockMovements.create({
+          productId: product.id,
+          type: "entry",
+          quantity: 1,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+
+      const firstPage = await adminCtx.caller.stockMovements.listByProduct({
+        productId: product.id,
+        limit: 2,
+      });
+
+      expect(firstPage.movements).toHaveLength(2);
+      expect(firstPage.nextCursor).toBeDefined();
+
+      const secondPage = await adminCtx.caller.stockMovements.listByProduct({
+        productId: product.id,
+        limit: 2,
+        cursor: firstPage.nextCursor,
+      });
+
+      expect(secondPage.movements).toHaveLength(2);
+      expect(secondPage.nextCursor).toBeDefined();
+
+      const thirdPage = await adminCtx.caller.stockMovements.listByProduct({
+        productId: product.id,
+        limit: 2,
+        cursor: secondPage.nextCursor,
+      });
+
+      expect(thirdPage.movements).toHaveLength(1);
+      expect(thirdPage.nextCursor).toBeUndefined();
+    });
+
+    it("does not skip or duplicate rows across pages", async () => {
+      const admin = await createTestTenant();
+      const adminCtx = await createTenantContext(admin);
+
+      const product = await adminCtx.caller.products.create({
+        name: "No Duplicate Product",
+        category: "Test",
+        unit: "pcs",
+        price: 10,
+        quantity: 100,
+      });
+
+      const createdIds: string[] = [];
+      for (let i = 0; i < 7; i++) {
+        const movement = await adminCtx.caller.stockMovements.create({
+          productId: product.id,
+          type: "entry",
+          quantity: 1,
+        });
+        createdIds.push(movement.id);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+
+      const allIds: string[] = [];
+      let cursor: string | undefined = undefined;
+
+      while (true) {
+        const page = await adminCtx.caller.stockMovements.listByProduct({
+          productId: product.id,
+          limit: 3,
+          cursor,
+        });
+
+        for (const m of page.movements) {
+          allIds.push(m.id);
+        }
+
+        if (!page.nextCursor) break;
+        cursor = page.nextCursor;
+      }
+
+      expect(allIds).toHaveLength(7);
+      expect(new Set(allIds).size).toBe(7);
+
+      const allCreatedIds = new Set(createdIds);
+      for (const id of allIds) {
+        expect(allCreatedIds.has(id)).toBe(true);
+      }
+    });
+
+    it("uses deterministic ordering with id tie-breaker", async () => {
+      const admin = await createTestTenant();
+      const adminCtx = await createTenantContext(admin);
+
+      const product = await adminCtx.caller.products.create({
+        name: "Tie Breaker Product",
+        category: "Test",
+        unit: "pcs",
+        price: 10,
+        quantity: 100,
+      });
+
+      const movements = [];
+      for (let i = 0; i < 5; i++) {
+        const movement = await adminCtx.caller.stockMovements.create({
+          productId: product.id,
+          type: i % 2 === 0 ? "entry" : "exit",
+          quantity: 1,
+        });
+        movements.push(movement);
+      }
+
+      const result = await adminCtx.caller.stockMovements.listByProduct({
+        productId: product.id,
+        limit: 10,
+      });
+
+      expect(result.movements).toHaveLength(5);
+
+      for (let i = 0; i < result.movements.length - 1; i++) {
+        const current = result.movements[i];
+        const next = result.movements[i + 1];
+        if (current && next) {
+          const currentTime = new Date(current.createdAt).getTime();
+          const nextTime = new Date(next.createdAt).getTime();
+          expect(currentTime).toBeGreaterThanOrEqual(nextTime);
+        }
+      }
+    });
+
+    it("returns only tenant-owned movements", async () => {
+      const tenantA = await createTestTenant();
+      const tenantB = await createTestTenant();
+      const ctxA = await createTenantContext(tenantA);
+      const ctxB = await createTenantContext(tenantB);
+
+      const productA = await ctxA.caller.products.create({
+        name: "Product A",
+        category: "Test",
+        unit: "pcs",
+        price: 10,
+        quantity: 100,
+      });
+
+      const productB = await ctxB.caller.products.create({
+        name: "Product B",
+        category: "Test",
+        unit: "pcs",
+        price: 10,
+        quantity: 100,
+      });
+
+      await ctxA.caller.stockMovements.create({
+        productId: productA.id,
+        type: "entry",
+        quantity: 10,
+      });
+
+      await ctxB.caller.stockMovements.create({
+        productId: productB.id,
+        type: "entry",
+        quantity: 20,
+      });
+
+      const resultA = await ctxA.caller.stockMovements.listByProduct({
+        productId: productA.id,
+        limit: 10,
+      });
+
+      const resultB = await ctxB.caller.stockMovements.listByProduct({
+        productId: productB.id,
+        limit: 10,
+      });
+
+      expect(resultA.movements).toHaveLength(1);
+      expect(resultA.movements[0]?.quantity).toBe(10);
+
+      expect(resultB.movements).toHaveLength(1);
+      expect(resultB.movements[0]?.quantity).toBe(20);
+    });
+
+    it("allows Admin, Manager, and Operator to list movements", async () => {
+      const admin = await createTestTenant();
+      const manager = await addUserToTenantWithRole(admin.tenantId, "Manager");
+      const operator = await addUserToTenantWithRole(admin.tenantId, "Operator");
+
+      const adminCtx = await createTenantContext(admin);
+      const managerCtx = await createTenantContext(manager);
+      const operatorCtx = await createTenantContext(operator);
+
+      const product = await adminCtx.caller.products.create({
+        name: "RBAC Product",
+        category: "Test",
+        unit: "pcs",
+        price: 10,
+        quantity: 100,
+      });
+
+      await adminCtx.caller.stockMovements.create({
+        productId: product.id,
+        type: "entry",
+        quantity: 50,
+      });
+
+      const adminResult = await adminCtx.caller.stockMovements.listByProduct({
+        productId: product.id,
+        limit: 10,
+      });
+      expect(adminResult.movements).toHaveLength(1);
+
+      const managerResult = await managerCtx.caller.stockMovements.listByProduct({
+        productId: product.id,
+        limit: 10,
+      });
+      expect(managerResult.movements).toHaveLength(1);
+
+      const operatorResult = await operatorCtx.caller.stockMovements.listByProduct({
+        productId: product.id,
+        limit: 10,
+      });
+      expect(operatorResult.movements).toHaveLength(1);
+    }, 20000);
+  });
 });

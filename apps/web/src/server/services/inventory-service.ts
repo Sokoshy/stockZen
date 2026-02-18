@@ -1,5 +1,5 @@
 import { products, stockMovements } from "~/server/db/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, lt, or, sql } from "drizzle-orm";
 import { logger } from "~/server/logger";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "~/server/db/schema";
@@ -22,6 +22,33 @@ export interface MovementOutput {
   type: "entry" | "exit";
   quantity: number;
   createdAt: Date;
+}
+
+export interface MovementListOutput {
+  id: string;
+  productId: string;
+  type: "entry" | "exit";
+  quantity: number;
+  createdAt: Date;
+  syncStatus: "synced";
+}
+
+function encodeCursor(createdAt: Date, id: string): string {
+  return Buffer.from(`${createdAt.toISOString()}|${id}`).toString("base64");
+}
+
+function decodeCursor(cursor: string): { createdAt: string; id: string } | null {
+  try {
+    const decoded = Buffer.from(cursor, "base64").toString("utf-8");
+    const separatorIndex = decoded.lastIndexOf("|");
+    if (separatorIndex === -1) return null;
+    const createdAtStr = decoded.substring(0, separatorIndex);
+    const id = decoded.substring(separatorIndex + 1);
+    if (!createdAtStr || !id) return null;
+    return { createdAt: createdAtStr, id };
+  } catch {
+    return null;
+  }
 }
 
 export const inventoryService = {
@@ -113,26 +140,52 @@ export const inventoryService = {
     limit: number;
     cursor?: string;
   }): Promise<{
-    movements: MovementOutput[];
+    movements: MovementListOutput[];
     nextCursor?: string;
   }> {
-    const query = db.query.stockMovements.findMany({
-      where: and(
-        eq(stockMovements.tenantId, tenantId),
-        eq(stockMovements.productId, productId)
-      ),
-      orderBy: [desc(stockMovements.createdAt)],
-      limit: limit + 1,
-    });
+    const cursorData = cursor ? decodeCursor(cursor) : null;
 
-    if (cursor) {
-      // Add cursor-based pagination if needed
+    const baseConditions = and(
+      eq(stockMovements.tenantId, tenantId),
+      eq(stockMovements.productId, productId)
+    );
+
+    let whereClause = baseConditions;
+
+    if (cursorData) {
+      whereClause = and(
+        baseConditions,
+        sql`(
+          ${stockMovements.createdAt} < ${cursorData.createdAt}::timestamptz
+          OR (
+            ${stockMovements.createdAt} = ${cursorData.createdAt}::timestamptz
+            AND ${stockMovements.id} < ${cursorData.id}::uuid
+          )
+        )`
+      );
     }
 
-    const results = await query;
+    const results = await db
+      .select({
+        id: stockMovements.id,
+        productId: stockMovements.productId,
+        type: stockMovements.type,
+        quantity: stockMovements.quantity,
+        createdAt: stockMovements.createdAt,
+      })
+      .from(stockMovements)
+      .where(whereClause)
+      .orderBy(desc(stockMovements.createdAt), desc(stockMovements.id))
+      .limit(limit + 1);
 
     const hasMore = results.length > limit;
     const movements = hasMore ? results.slice(0, limit) : results;
+
+    const lastMovement = movements[movements.length - 1];
+    const nextCursor =
+      hasMore && lastMovement
+        ? encodeCursor(lastMovement.createdAt, lastMovement.id)
+        : undefined;
 
     return {
       movements: movements.map((m) => ({
@@ -141,8 +194,9 @@ export const inventoryService = {
         type: m.type,
         quantity: m.quantity,
         createdAt: m.createdAt,
+        syncStatus: "synced" as const,
       })),
-      nextCursor: hasMore ? movements[movements.length - 1]?.id : undefined,
+      nextCursor,
     };
   },
 
