@@ -13,12 +13,19 @@ export interface CreateProductOfflineInput {
   purchasePrice?: number | null;
   quantity?: number;
   lowStockThreshold?: number | null;
+  thresholdMode?: "defaults" | "custom";
+  customCriticalThreshold?: number | null;
+  customAttentionThreshold?: number | null;
 }
 
 export async function createProductOffline(input: CreateProductOfflineInput): Promise<LocalProduct> {
   const now = new Date().toISOString();
   const localId = crypto.randomUUID();
   const operationId = crypto.randomUUID();
+
+  const thresholdMode = input.thresholdMode ?? "defaults";
+  const customCriticalThreshold = thresholdMode === "custom" ? input.customCriticalThreshold ?? null : null;
+  const customAttentionThreshold = thresholdMode === "custom" ? input.customAttentionThreshold ?? null : null;
 
   const localProduct: LocalProduct = {
     id: localId,
@@ -33,6 +40,8 @@ export async function createProductOffline(input: CreateProductOfflineInput): Pr
     purchasePrice: input.purchasePrice ?? null,
     quantity: input.quantity ?? 0,
     lowStockThreshold: input.lowStockThreshold ?? null,
+    customCriticalThreshold,
+    customAttentionThreshold,
     syncStatus: "pending",
     createdAt: now,
     updatedAt: now,
@@ -61,6 +70,9 @@ export async function createProductOffline(input: CreateProductOfflineInput): Pr
         purchasePrice: input.purchasePrice,
         quantity: input.quantity ?? 0,
         lowStockThreshold: input.lowStockThreshold,
+        thresholdMode,
+        customCriticalThreshold,
+        customAttentionThreshold,
       },
     });
   });
@@ -158,6 +170,14 @@ export async function applyServerProductState(
       serverState.lowStockThreshold !== undefined
         ? (serverState.lowStockThreshold as number | null)
         : existing.lowStockThreshold,
+    customCriticalThreshold:
+      serverState.customCriticalThreshold !== undefined
+        ? (serverState.customCriticalThreshold as number | null)
+        : existing.customCriticalThreshold,
+    customAttentionThreshold:
+      serverState.customAttentionThreshold !== undefined
+        ? (serverState.customAttentionThreshold as number | null)
+        : existing.customAttentionThreshold,
     deletedAt:
       serverState.deletedAt !== undefined
         ? (serverState.deletedAt as string | null)
@@ -186,6 +206,9 @@ export interface UpdateProductOfflineInput {
   price?: number;
   purchasePrice?: number | null;
   lowStockThreshold?: number | null;
+  thresholdMode?: "defaults" | "custom";
+  customCriticalThreshold?: number | null;
+  customAttentionThreshold?: number | null;
 }
 
 export async function updateProductOffline(input: UpdateProductOfflineInput): Promise<LocalProduct> {
@@ -201,6 +224,10 @@ export async function updateProductOffline(input: UpdateProductOfflineInput): Pr
     throw new Error("Product does not belong to the provided tenant");
   }
 
+  const thresholdMode = input.thresholdMode ?? "defaults";
+  const customCriticalThreshold = thresholdMode === "custom" ? input.customCriticalThreshold ?? null : null;
+  const customAttentionThreshold = thresholdMode === "custom" ? input.customAttentionThreshold ?? null : null;
+
   const updatedProduct: LocalProduct = {
     ...existingProduct,
     name: input.name ?? existingProduct.name,
@@ -212,6 +239,8 @@ export async function updateProductOffline(input: UpdateProductOfflineInput): Pr
     price: input.price ?? existingProduct.price,
     purchasePrice: input.purchasePrice !== undefined ? input.purchasePrice : existingProduct.purchasePrice,
     lowStockThreshold: input.lowStockThreshold !== undefined ? input.lowStockThreshold : existingProduct.lowStockThreshold,
+    customCriticalThreshold,
+    customAttentionThreshold,
     syncStatus: "pending",
     updatedAt: now,
   };
@@ -239,6 +268,8 @@ export async function updateProductOffline(input: UpdateProductOfflineInput): Pr
           price: existingProduct.price,
           purchasePrice: existingProduct.purchasePrice,
           lowStockThreshold: existingProduct.lowStockThreshold,
+          customCriticalThreshold: existingProduct.customCriticalThreshold,
+          customAttentionThreshold: existingProduct.customAttentionThreshold,
         },
         updatedFields: {
           name: input.name,
@@ -250,6 +281,9 @@ export async function updateProductOffline(input: UpdateProductOfflineInput): Pr
           price: input.price,
           purchasePrice: input.purchasePrice,
           lowStockThreshold: input.lowStockThreshold,
+          thresholdMode,
+          customCriticalThreshold,
+          customAttentionThreshold,
         },
       },
     });

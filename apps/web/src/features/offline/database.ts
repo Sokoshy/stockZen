@@ -13,6 +13,8 @@ export interface LocalProduct {
   purchasePrice: number | null;
   quantity: number;
   lowStockThreshold: number | null;
+  customCriticalThreshold: number | null;
+  customAttentionThreshold: number | null;
   syncStatus: "pending" | "synced" | "failed";
   createdAt: string;
   updatedAt: string;
@@ -70,6 +72,14 @@ db.version(3).stores({
 });
 
 db.version(4).stores({
+  products: "id, tenantId, syncStatus, category, barcode, [tenantId+syncStatus], deletedAt",
+  stockMovements:
+    "id, tenantId, productId, syncStatus, clientCreatedAt, [tenantId+syncStatus], [productId+clientCreatedAt]",
+  outbox:
+    "id, operationId, entityType, entityId, status, createdAt, [entityType+entityId], [entityType+operationId]",
+});
+
+db.version(5).stores({
   products: "id, tenantId, syncStatus, category, barcode, [tenantId+syncStatus], deletedAt",
   stockMovements:
     "id, tenantId, productId, syncStatus, clientCreatedAt, [tenantId+syncStatus], [productId+clientCreatedAt]",

@@ -51,11 +51,17 @@ export async function createMovement(
       purchasePrice: input.productSnapshot.purchasePrice ?? null,
       quantity: input.productSnapshot.quantity ?? 0,
       lowStockThreshold: input.productSnapshot.lowStockThreshold ?? null,
+      customCriticalThreshold: null,
+      customAttentionThreshold: null,
       syncStatus: "synced" as const,
       createdAt: now,
       updatedAt: now,
       deletedAt: null,
     };
+  }
+
+  if (!product) {
+    throw new Error("Product not found for this tenant");
   }
 
   if (product.tenantId !== input.tenantId) {

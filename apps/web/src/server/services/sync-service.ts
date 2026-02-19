@@ -43,6 +43,48 @@ function parseClientTimestamp(value: unknown): Date | null {
   return parsed;
 }
 
+function isThresholdMode(value: unknown): value is "defaults" | "custom" {
+  return value === "defaults" || value === "custom";
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function parseCustomThresholdPair(
+  criticalRaw: unknown,
+  attentionRaw: unknown
+):
+  | { ok: true; criticalThreshold: number; attentionThreshold: number }
+  | { ok: false; message: string } {
+  if (!isPositiveInteger(criticalRaw)) {
+    return {
+      ok: false,
+      message: "Critical threshold must be a positive integer",
+    };
+  }
+
+  if (!isPositiveInteger(attentionRaw)) {
+    return {
+      ok: false,
+      message: "Attention threshold must be a positive integer",
+    };
+  }
+
+  if (criticalRaw >= attentionRaw) {
+    return {
+      ok: false,
+      message: "Critical threshold must be less than attention threshold",
+    };
+  }
+
+  return {
+    ok: true,
+    criticalThreshold: criticalRaw,
+    attentionThreshold: attentionRaw,
+  };
+}
+
 function buildServerProductState(product: typeof products.$inferSelect): Record<string, unknown> {
   return {
     id: product.id,
@@ -56,6 +98,8 @@ function buildServerProductState(product: typeof products.$inferSelect): Record<
     purchasePrice: product.purchasePrice != null ? Number(product.purchasePrice) : null,
     quantity: product.quantity,
     lowStockThreshold: product.lowStockThreshold,
+    customCriticalThreshold: product.customCriticalThreshold,
+    customAttentionThreshold: product.customAttentionThreshold,
     deletedAt: product.deletedAt,
     updatedAt: product.updatedAt,
   };
@@ -82,6 +126,34 @@ async function processProductCreate(
     };
   }
 
+  const thresholdModeRaw = payload.thresholdMode ?? "defaults";
+  if (!isThresholdMode(thresholdModeRaw)) {
+    return {
+      status: "validation_error",
+      message: "thresholdMode must be either 'defaults' or 'custom'",
+    };
+  }
+
+  let customCriticalThreshold: number | null = null;
+  let customAttentionThreshold: number | null = null;
+
+  if (thresholdModeRaw === "custom") {
+    const parsedPair = parseCustomThresholdPair(
+      payload.customCriticalThreshold,
+      payload.customAttentionThreshold
+    );
+
+    if (!parsedPair.ok) {
+      return {
+        status: "validation_error",
+        message: parsedPair.message,
+      };
+    }
+
+    customCriticalThreshold = parsedPair.criticalThreshold;
+    customAttentionThreshold = parsedPair.attentionThreshold;
+  }
+
   const [newProduct] = await db
     .insert(products)
     .values({
@@ -97,6 +169,8 @@ async function processProductCreate(
       purchasePrice: payload.purchasePrice != null ? String(payload.purchasePrice) : null,
       quantity: (payload.quantity as number) ?? 0,
       lowStockThreshold: payload.lowStockThreshold as number | null ?? null,
+      customCriticalThreshold,
+      customAttentionThreshold,
     })
     .returning();
 
@@ -138,6 +212,62 @@ async function processProductUpdate(
     };
   }
 
+  let customCriticalThreshold = existingProduct.customCriticalThreshold;
+  let customAttentionThreshold = existingProduct.customAttentionThreshold;
+
+  const hasCustomCriticalInPayload =
+    updatedFields !== undefined &&
+    Object.prototype.hasOwnProperty.call(updatedFields, "customCriticalThreshold");
+  const hasCustomAttentionInPayload =
+    updatedFields !== undefined &&
+    Object.prototype.hasOwnProperty.call(updatedFields, "customAttentionThreshold");
+
+  if (updatedFields?.thresholdMode === undefined) {
+    if (hasCustomCriticalInPayload || hasCustomAttentionInPayload) {
+      return {
+        status: "validation_error",
+        message: "thresholdMode is required when updating custom thresholds",
+      };
+    }
+  } else {
+    if (!isThresholdMode(updatedFields.thresholdMode)) {
+      return {
+        status: "validation_error",
+        message: "thresholdMode must be either 'defaults' or 'custom'",
+      };
+    }
+
+    if (updatedFields.thresholdMode === "defaults") {
+      if (
+        (hasCustomCriticalInPayload && updatedFields.customCriticalThreshold != null) ||
+        (hasCustomAttentionInPayload && updatedFields.customAttentionThreshold != null)
+      ) {
+        return {
+          status: "validation_error",
+          message: "Custom thresholds must be omitted when using tenant defaults",
+        };
+      }
+
+      customCriticalThreshold = null;
+      customAttentionThreshold = null;
+    } else {
+      const parsedPair = parseCustomThresholdPair(
+        updatedFields.customCriticalThreshold,
+        updatedFields.customAttentionThreshold
+      );
+
+      if (!parsedPair.ok) {
+        return {
+          status: "validation_error",
+          message: parsedPair.message,
+        };
+      }
+
+      customCriticalThreshold = parsedPair.criticalThreshold;
+      customAttentionThreshold = parsedPair.attentionThreshold;
+    }
+  }
+
   const [updatedProduct] = await db
     .update(products)
     .set({
@@ -162,6 +292,8 @@ async function processProductUpdate(
       lowStockThreshold: updatedFields?.lowStockThreshold !== undefined 
         ? (updatedFields.lowStockThreshold as number | null) 
         : existingProduct.lowStockThreshold,
+      customCriticalThreshold,
+      customAttentionThreshold,
       updatedAt: new Date(),
     })
     .where(and(eq(products.id, entityId), eq(products.tenantId, tenantId)))
