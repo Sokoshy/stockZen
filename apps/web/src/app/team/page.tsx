@@ -46,14 +46,14 @@ export default async function TeamPage() {
         {canManage ? (
           <div className="rounded-lg bg-white p-6 shadow">
             <h2 className="mb-4 text-lg font-semibold text-gray-900">Invite Team Member</h2>
-            <InviteUserForm onInviteCreated={async () => {}} />
+            <InviteUserForm />
           </div>
         ) : null}
 
         {canManage ? (
           <div className="rounded-lg bg-white p-6 shadow">
             <h2 className="mb-4 text-lg font-semibold text-gray-900">Pending Invitations</h2>
-            <PendingInvitationsTable canManage={canManage} onInvitationRevoked={async () => {}} />
+            <PendingInvitationsTable canManage={canManage} />
           </div>
         ) : null}
 

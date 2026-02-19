@@ -6,11 +6,8 @@ import { api } from "~/trpc/react";
 
 const VALID_ROLES = ["Admin", "Manager", "Operator"] as const;
 
-type InviteUserFormProps = {
-  onInviteCreated: () => Promise<void>;
-};
-
-export function InviteUserForm({ onInviteCreated }: InviteUserFormProps) {
+export function InviteUserForm() {
+  const utils = api.useUtils();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<(typeof VALID_ROLES)[number]>("Manager");
   const [formError, setFormError] = useState<string | null>(null);
@@ -22,7 +19,7 @@ export function InviteUserForm({ onInviteCreated }: InviteUserFormProps) {
       setRole("Manager");
       setFormError(null);
       setSuccessMessage("Invitation sent successfully!");
-      await onInviteCreated();
+      await utils.auth.listInvitations.invalidate();
       setTimeout(() => setSuccessMessage(null), 5000);
     },
     onError: (error) => {

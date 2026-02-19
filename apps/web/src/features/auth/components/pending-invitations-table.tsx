@@ -10,19 +10,16 @@ const ROLE_COLORS: Record<string, string> = {
 
 type PendingInvitationsTableProps = {
   canManage: boolean;
-  onInvitationRevoked: () => Promise<void>;
 };
 
 export function PendingInvitationsTable({
   canManage,
-  onInvitationRevoked,
 }: PendingInvitationsTableProps) {
   const utils = api.useUtils();
   const invitationsQuery = api.auth.listInvitations.useQuery();
   const revokeInvitation = api.auth.revokeInvitation.useMutation({
     onSuccess: async () => {
       await utils.auth.listInvitations.invalidate();
-      await onInvitationRevoked();
     },
   });
 
