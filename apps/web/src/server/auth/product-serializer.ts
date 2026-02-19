@@ -1,21 +1,31 @@
 import type { Product } from "~/server/db/schema";
 import type { ProductOutput } from "~/schemas/products";
 import type { TenantRole } from "~/schemas/team-membership";
+import { hasValidCustomThresholdPair } from "~/schemas/products";
 import { canViewPurchasePrice, canWritePurchasePrice } from "./rbac-policy";
 
 type ProductRecord = Omit<Product, "purchasePrice"> & {
   purchasePrice?: Product["purchasePrice"];
 };
 
-/**
- * Serializes a product for API response based on the user's role.
- * Operators will NOT receive purchasePrice (field is omitted).
- * Admin and Manager will receive all fields.
- */
+function deriveThresholdMode(product: ProductRecord): "defaults" | "custom" {
+  if (
+    hasValidCustomThresholdPair(
+      product.customCriticalThreshold,
+      product.customAttentionThreshold
+    )
+  ) {
+    return "custom";
+  }
+  return "defaults";
+}
+
 export function serializeProductForRole(
   product: ProductRecord,
   role: TenantRole
 ): ProductOutput {
+  const thresholdMode = deriveThresholdMode(product);
+  
   const baseOutput = {
     id: product.id,
     tenantId: product.tenantId,
@@ -28,6 +38,9 @@ export function serializeProductForRole(
     price: Number(product.price),
     quantity: product.quantity,
     lowStockThreshold: product.lowStockThreshold,
+    thresholdMode,
+    customCriticalThreshold: product.customCriticalThreshold,
+    customAttentionThreshold: product.customAttentionThreshold,
     createdAt: product.createdAt.toISOString(),
     updatedAt: product.updatedAt.toISOString(),
     deletedAt: product.deletedAt ? product.deletedAt.toISOString() : null,

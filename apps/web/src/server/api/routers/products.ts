@@ -4,7 +4,9 @@ import { z } from "zod";
 
 import {
   listProductsOutputSchema,
+  productInputBaseSchema,
   productInputSchema,
+  productUpdateDataSchema,
   productOutputSchema,
 } from "~/schemas/products";
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
@@ -16,6 +18,9 @@ import {
 import { canWritePurchasePrice } from "~/server/auth/rbac-policy";
 import { products } from "~/server/db/schema";
 import { logger } from "~/server/logger";
+
+type ProductInput = z.infer<typeof productInputBaseSchema>;
+type ProductUpdateData = z.infer<typeof productUpdateDataSchema>;
 
 const operatorProductColumns = {
   id: products.id,
@@ -29,6 +34,8 @@ const operatorProductColumns = {
   price: products.price,
   quantity: products.quantity,
   lowStockThreshold: products.lowStockThreshold,
+  customCriticalThreshold: products.customCriticalThreshold,
+  customAttentionThreshold: products.customAttentionThreshold,
   createdAt: products.createdAt,
   updatedAt: products.updatedAt,
   deletedAt: products.deletedAt,
@@ -166,7 +173,11 @@ export const productsRouter = createTRPCRouter({
       }
 
       const sanitizedInput = sanitizeProductInputForRole(input, role);
-      const fullInput = sanitizedInput as typeof input;
+      const fullInput = sanitizedInput as ProductInput;
+
+      const thresholdMode = fullInput.thresholdMode ?? "defaults";
+      const customCriticalThreshold = thresholdMode === "custom" ? fullInput.customCriticalThreshold ?? null : null;
+      const customAttentionThreshold = thresholdMode === "custom" ? fullInput.customAttentionThreshold ?? null : null;
 
       const [product] = await ctx.db
         .insert(products)
@@ -182,6 +193,8 @@ export const productsRouter = createTRPCRouter({
           quantity: fullInput.quantity ?? 0,
           lowStockThreshold: fullInput.lowStockThreshold ?? null,
           purchasePrice: fullInput.purchasePrice?.toString() ?? null,
+          customCriticalThreshold,
+          customAttentionThreshold,
         })
         .returning();
 
@@ -201,7 +214,7 @@ export const productsRouter = createTRPCRouter({
     .input(
       z.object({
         id: z.string().uuid(),
-        data: productInputSchema.partial(),
+        data: productUpdateDataSchema,
       })
     )
     .output(productOutputSchema)
@@ -250,7 +263,7 @@ export const productsRouter = createTRPCRouter({
       }
 
       const sanitizedData = sanitizeProductInputForRole(input.data, role);
-      const fullData = sanitizedData as typeof input.data;
+      const fullData = sanitizedData as ProductUpdateData;
 
       const updateData: Partial<typeof products.$inferInsert> = {
         updatedAt: new Date(),
@@ -269,6 +282,16 @@ export const productsRouter = createTRPCRouter({
       if (fullData.purchasePrice !== undefined) {
         updateData.purchasePrice =
           fullData.purchasePrice === null ? null : fullData.purchasePrice.toString();
+      }
+
+      if (fullData.thresholdMode !== undefined) {
+        if (fullData.thresholdMode === "defaults") {
+          updateData.customCriticalThreshold = null;
+          updateData.customAttentionThreshold = null;
+        } else if (fullData.thresholdMode === "custom") {
+          updateData.customCriticalThreshold = fullData.customCriticalThreshold ?? null;
+          updateData.customAttentionThreshold = fullData.customAttentionThreshold ?? null;
+        }
       }
 
       const [updatedProduct] = await ctx.db
