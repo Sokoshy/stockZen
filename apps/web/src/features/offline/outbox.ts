@@ -71,5 +71,6 @@ export async function markOperationFailed(
     status: "failed",
     retryCount: operation.retryCount + 1,
     error,
+    processedAt: new Date().toISOString(),
   });
 }

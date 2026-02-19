@@ -50,6 +50,7 @@ export async function createProductOffline(input: CreateProductOfflineInput): Pr
       payload: {
         operationId,
         tenantId: input.tenantId,
+        clientUpdatedAt: now,
         name: input.name,
         description: input.description,
         sku: input.sku,
@@ -105,6 +106,67 @@ export async function updateProductSyncStatus(
   await db.products.update(productId, {
     syncStatus: status,
     updatedAt: new Date().toISOString(),
+  });
+}
+
+export async function applyServerProductState(
+  productId: string,
+  serverState?: Record<string, unknown>
+): Promise<void> {
+  if (!serverState) {
+    return;
+  }
+
+  const existing = await db.products.get(productId);
+  if (!existing) {
+    return;
+  }
+
+  await db.products.update(productId, {
+    name: typeof serverState.name === "string" ? serverState.name : existing.name,
+    description:
+      serverState.description !== undefined
+        ? (serverState.description as string | null)
+        : existing.description,
+    sku:
+      serverState.sku !== undefined
+        ? (serverState.sku as string | null)
+        : existing.sku,
+    category:
+      serverState.category !== undefined
+        ? (serverState.category as string | null)
+        : existing.category,
+    unit:
+      serverState.unit !== undefined
+        ? (serverState.unit as string | null)
+        : existing.unit,
+    barcode:
+      serverState.barcode !== undefined
+        ? (serverState.barcode as string | null)
+        : existing.barcode,
+    price:
+      typeof serverState.price === "number" ? serverState.price : existing.price,
+    purchasePrice:
+      serverState.purchasePrice !== undefined
+        ? (serverState.purchasePrice as number | null)
+        : existing.purchasePrice,
+    quantity:
+      typeof serverState.quantity === "number"
+        ? serverState.quantity
+        : existing.quantity,
+    lowStockThreshold:
+      serverState.lowStockThreshold !== undefined
+        ? (serverState.lowStockThreshold as number | null)
+        : existing.lowStockThreshold,
+    deletedAt:
+      serverState.deletedAt !== undefined
+        ? (serverState.deletedAt as string | null)
+        : existing.deletedAt,
+    updatedAt:
+      typeof serverState.updatedAt === "string"
+        ? serverState.updatedAt
+        : new Date().toISOString(),
+    syncStatus: "synced",
   });
 }
 
@@ -165,6 +227,7 @@ export async function updateProductOffline(input: UpdateProductOfflineInput): Pr
       payload: {
         operationId,
         tenantId: input.tenantId,
+        clientUpdatedAt: now,
         originalProduct: {
           id: existingProduct.id,
           name: existingProduct.name,
@@ -229,6 +292,7 @@ export async function deleteProductOffline(input: DeleteProductOfflineInput): Pr
       payload: {
         operationId,
         tenantId: input.tenantId,
+        clientUpdatedAt: now,
         productId: input.id,
         originalProductName: input.originalProductName,
       },
