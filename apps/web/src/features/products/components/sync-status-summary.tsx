@@ -1,79 +1,110 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { db, type OutboxOperation } from "~/features/offline/database";
+import { useSyncStatus } from "~/features/offline/sync/use-sync-status";
 
-interface SyncStatusSummaryProps {
+interface SyncStatusIndicatorProps {
   tenantId: string;
+  showUpToDate?: boolean;
 }
 
-export function SyncStatusSummary({ tenantId }: SyncStatusSummaryProps) {
-  const [pendingCount, setPendingCount] = useState(0);
-  const [failedCount, setFailedCount] = useState(0);
+export function SyncStatusIndicator({ 
+  tenantId,
+  showUpToDate = true,
+}: SyncStatusIndicatorProps) {
+  const {
+    state,
+    statusText,
+    statusIcon,
+  } = useSyncStatus({ tenantId });
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const countPendingOperations = async () => {
-      try {
-        const allOperations = await db.outbox
-          .where("status")
-          .anyOf(["pending", "failed"])
-          .toArray();
-
-        const operations = allOperations.filter((op) => {
-          const tenantIdInPayload = (op.payload as { tenantId?: unknown }).tenantId;
-          return typeof tenantIdInPayload === "string" && tenantIdInPayload === tenantId;
-        });
-
-        const pending = operations.filter(
-          (op: OutboxOperation) => op.status === "pending"
-        ).length;
-        const failed = operations.filter(
-          (op: OutboxOperation) => op.status === "failed"
-        ).length;
-
-        if (!cancelled) {
-          setPendingCount(pending);
-          setFailedCount(failed);
-        }
-      } catch {
-        if (!cancelled) {
-          setPendingCount(0);
-          setFailedCount(0);
-        }
-      }
-    };
-
-    void countPendingOperations();
-
-    const interval = setInterval(countPendingOperations, 5000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [tenantId]);
-
-  if (pendingCount === 0 && failedCount === 0) {
+  if (state === "upToDate" && !showUpToDate) {
     return null;
   }
 
-  const getStatusMessage = () => {
-    if (failedCount > 0 && pendingCount > 0) {
-      return `${pendingCount} change${pendingCount === 1 ? "" : "s"} pending, ${failedCount} failed`;
+  const getStatusClasses = () => {
+    switch (state) {
+      case "syncing":
+        return "bg-blue-50 text-blue-700 border-blue-200";
+      case "upToDate":
+        return "bg-green-50 text-green-700 border-green-200";
+      case "offline":
+        return "bg-gray-50 text-gray-700 border-gray-200";
+      case "error":
+        return "bg-red-50 text-red-700 border-red-200";
     }
-    if (failedCount > 0) {
-      return `${failedCount} sync failure${failedCount === 1 ? "" : "s"}`;
-    }
-    return `${pendingCount} change${pendingCount === 1 ? "" : "s"} pending sync`;
   };
 
-  const getStatusClasses = () => {
-    if (failedCount > 0) {
-      return "bg-red-50 text-red-700 border-red-200";
+  const renderIcon = () => {
+    switch (statusIcon) {
+      case "sync":
+        return (
+          <svg
+            className="h-5 w-5 flex-shrink-0 animate-spin"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+            />
+          </svg>
+        );
+      case "check":
+        return (
+          <svg
+            className="h-5 w-5 flex-shrink-0"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M5 13l4 4L19 7"
+            />
+          </svg>
+        );
+      case "cloud-off":
+        return (
+          <svg
+            className="h-5 w-5 flex-shrink-0"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.243 2.829a4.978 4.978 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824 2.167a1 1 0 111.414 1.414m-1.414-1.414L3 3m8.293 8.293l1.414 1.414"
+            />
+          </svg>
+        );
+      case "alert-circle":
+        return (
+          <svg
+            className="h-5 w-5 flex-shrink-0"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+        );
     }
-    return "bg-amber-50 text-amber-700 border-amber-200";
   };
 
   return (
@@ -83,22 +114,13 @@ export function SyncStatusSummary({ tenantId }: SyncStatusSummaryProps) {
       aria-live="polite"
     >
       <div className="flex items-center gap-2">
-        <svg
-          className="h-5 w-5 flex-shrink-0"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          aria-hidden="true"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-          />
-        </svg>
-        <span className="text-sm font-medium">{getStatusMessage()}</span>
+        {renderIcon()}
+        <span className="text-sm font-medium">{statusText}</span>
       </div>
     </div>
   );
+}
+
+export function SyncStatusSummary({ tenantId }: { tenantId: string }) {
+  return <SyncStatusIndicator tenantId={tenantId} />;
 }

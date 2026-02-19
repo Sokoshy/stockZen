@@ -9,12 +9,13 @@ import { useSearchParams } from "next/navigation";
 import { stockMovementSchema } from "~/schemas/stock-movements";
 import {
   createMovement,
-  getPendingMovementSyncItems,
   getRecentProductIds,
-  markMovementSyncFailed,
-  markMovementSynced,
-  markMovementSyncing,
 } from "~/features/offline/movement-operations";
+import {
+  acquireSyncEngine,
+  getSyncEngine,
+  releaseSyncEngine,
+} from "~/features/offline/sync/sync-engine";
 import { api } from "~/trpc/react";
 import { ProductSelector } from "./product-selector";
 import { MovementTypeToggle } from "./movement-type-toggle";
@@ -39,8 +40,6 @@ export function StockMovementForm({ tenantId }: StockMovementFormProps) {
 
   const { data: productsData } = api.products.list.useQuery();
   const products = productsData?.products ?? [];
-
-  const createMovementMutation = api.stockMovements.create.useMutation();
 
   const {
     register,
@@ -111,66 +110,33 @@ export function StockMovementForm({ tenantId }: StockMovementFormProps) {
     setRecentProducts(recent);
   }, [products, tenantId]);
 
-  const syncPendingMovements = useCallback(async () => {
-    if (typeof window !== "undefined" && !window.navigator.onLine) {
-      return;
-    }
-
-    const pendingItems = await getPendingMovementSyncItems(tenantId);
-
-    for (const item of pendingItems) {
-      try {
-        await markMovementSyncing({
-          movementId: item.movementId,
-          operationId: item.operationId,
-        });
-
-        const response = await createMovementMutation.mutateAsync({
-          productId: item.productId,
-          type: item.type,
-          quantity: item.quantity,
-          idempotencyKey: item.idempotencyKey,
-        });
-
-        await markMovementSynced({
-          movementId: item.movementId,
-          operationId: item.operationId,
-          serverMovementId: response.id,
-        });
-      } catch (syncError) {
-        await markMovementSyncFailed({
-          movementId: item.movementId,
-          operationId: item.operationId,
-          error: syncError instanceof Error ? syncError.message : "Failed to sync movement",
-        });
-      }
-    }
-
-    await Promise.all([
-      utils.products.list.invalidate(),
-      utils.stockMovements.getPendingCount.invalidate(),
-    ]);
-    await loadRecentProducts();
-  }, [createMovementMutation, loadRecentProducts, tenantId, utils.products.list, utils.stockMovements.getPendingCount]);
-
   useEffect(() => {
     void loadRecentProducts();
   }, [loadRecentProducts]);
 
   useEffect(() => {
-    const attemptSync = () => {
-      void syncPendingMovements();
+    const syncEngine = acquireSyncEngine({ tenantId });
+    void syncEngine.start();
+
+    const handleSyncComplete = async () => {
+      await Promise.all([
+        utils.products.list.invalidate(),
+        utils.stockMovements.getPendingCount.invalidate(),
+      ]);
+      await loadRecentProducts();
     };
 
-    void syncPendingMovements();
-    window.addEventListener("online", attemptSync);
-    const interval = window.setInterval(attemptSync, 10000);
+    const unsubscribe = syncEngine.subscribe((state) => {
+      if (state.state === "upToDate" || state.state === "error") {
+        void handleSyncComplete();
+      }
+    });
 
     return () => {
-      window.removeEventListener("online", attemptSync);
-      window.clearInterval(interval);
+      unsubscribe();
+      releaseSyncEngine(tenantId);
     };
-  }, [syncPendingMovements]);
+  }, [tenantId, utils.products.list, utils.stockMovements.getPendingCount, loadRecentProducts]);
 
   const onSubmit = async (data: MovementFormData) => {
     setIsSubmitting(true);
@@ -184,7 +150,6 @@ export function StockMovementForm({ tenantId }: StockMovementFormProps) {
         return;
       }
 
-      // Always save locally first (offline-first approach)
       await createMovement({
         tenantId,
         productId: data.productId,
@@ -215,7 +180,8 @@ export function StockMovementForm({ tenantId }: StockMovementFormProps) {
       ]);
       await loadRecentProducts();
 
-      void syncPendingMovements();
+      const syncEngine = getSyncEngine({ tenantId });
+      void syncEngine.sync();
 
       reset();
     } catch (err) {
@@ -242,7 +208,6 @@ export function StockMovementForm({ tenantId }: StockMovementFormProps) {
   return (
     <div className="mx-auto w-full max-w-md p-4">
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-        {/* Product Selection */}
         <div className="space-y-2">
           <label className="text-sm font-medium">Product</label>
           <ProductSelector
@@ -254,7 +219,6 @@ export function StockMovementForm({ tenantId }: StockMovementFormProps) {
           />
         </div>
 
-        {/* Movement Type Toggle */}
         <div className="space-y-2">
           <label className="text-sm font-medium">Movement Type</label>
           <MovementTypeToggle
@@ -263,7 +227,6 @@ export function StockMovementForm({ tenantId }: StockMovementFormProps) {
           />
         </div>
 
-        {/* Quantity Input */}
         <div className="space-y-2">
           <label htmlFor="quantity" className="text-sm font-medium">
             Quantity
@@ -285,21 +248,18 @@ export function StockMovementForm({ tenantId }: StockMovementFormProps) {
           )}
         </div>
 
-        {/* Error Message */}
         {error && (
           <div className="p-3 bg-red-50 border border-red-200 rounded-md">
             <p className="text-sm text-red-600">{error}</p>
           </div>
         )}
 
-        {/* Success Message */}
         {success && (
           <div className="p-3 bg-green-50 border border-green-200 rounded-md">
             <p className="text-sm text-green-600">{success}</p>
           </div>
         )}
 
-        {/* Submit Button */}
         <button
           type="submit"
           disabled={isSubmitting}
