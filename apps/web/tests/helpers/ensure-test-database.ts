@@ -66,6 +66,41 @@ async function ensureProductStory21Columns(target: ReturnType<typeof postgres>):
   `);
 }
 
+async function ensureTenantThresholdColumns(target: ReturnType<typeof postgres>): Promise<void> {
+  const tenantsTableExists = await target<{ exists: boolean }[]>`
+    select exists (
+      select 1
+      from information_schema.tables
+      where table_schema = 'public'
+        and table_name = 'tenants'
+    ) as exists
+  `;
+
+  if (!tenantsTableExists[0]?.exists) {
+    return;
+  }
+
+  await target.unsafe(`
+    ALTER TABLE tenants
+      ADD COLUMN IF NOT EXISTS default_critical_threshold integer DEFAULT 50 NOT NULL;
+    ALTER TABLE tenants
+      ADD COLUMN IF NOT EXISTS default_attention_threshold integer DEFAULT 100 NOT NULL;
+
+    ALTER TABLE tenants DROP CONSTRAINT IF EXISTS critical_positive;
+    ALTER TABLE tenants DROP CONSTRAINT IF EXISTS attention_positive;
+    ALTER TABLE tenants DROP CONSTRAINT IF EXISTS critical_less_than_attention;
+
+    ALTER TABLE tenants
+      ADD CONSTRAINT critical_positive CHECK (default_critical_threshold > 0);
+    ALTER TABLE tenants
+      ADD CONSTRAINT attention_positive CHECK (default_attention_threshold > 0);
+    ALTER TABLE tenants
+      ADD CONSTRAINT critical_less_than_attention CHECK (
+        default_critical_threshold < default_attention_threshold
+      );
+  `);
+}
+
 export async function ensureTestDatabaseReady(): Promise<void> {
   const testDatabaseUrlRaw = getTestDatabaseUrl();
 
@@ -132,6 +167,7 @@ export async function ensureTestDatabaseReady(): Promise<void> {
 
     if (tableCheck[0]?.exists) {
       await ensureProductStory21Columns(target);
+      await ensureTenantThresholdColumns(target);
       return;
     }
 
@@ -146,6 +182,7 @@ export async function ensureTestDatabaseReady(): Promise<void> {
     }
 
     await ensureProductStory21Columns(target);
+    await ensureTenantThresholdColumns(target);
   } catch {
   } finally {
     await target.end({ timeout: 5 });

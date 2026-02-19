@@ -1,4 +1,4 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   boolean,
   index,
@@ -11,6 +11,7 @@ import {
   uuid,
   varchar,
   pgEnum,
+  check,
 } from "drizzle-orm/pg-core";
 
 export const createTable = pgTableCreator((name) => `pg-drizzle_${name}`);
@@ -95,13 +96,19 @@ export const tenantRoleEnum = pgEnum("tenant_role", [
 export const tenants = pgTable("tenants", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: varchar("name", { length: 255 }).notNull(),
+  defaultCriticalThreshold: integer("default_critical_threshold").notNull().default(50),
+  defaultAttentionThreshold: integer("default_attention_threshold").notNull().default(100),
   createdAt: timestamp("created_at", { withTimezone: true })
     .$defaultFn(() => new Date())
     .notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .$defaultFn(() => new Date())
     .notNull(),
-});
+}, (table) => [
+  check("critical_positive", sql`${table.defaultCriticalThreshold} > 0`),
+  check("attention_positive", sql`${table.defaultAttentionThreshold} > 0`),
+  check("critical_less_than_attention", sql`${table.defaultCriticalThreshold} < ${table.defaultAttentionThreshold}`)
+]);
 
 export const tenantMemberships = pgTable("tenant_memberships", {
   id: uuid("id").primaryKey().defaultRandom(),

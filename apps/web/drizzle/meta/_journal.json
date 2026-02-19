@@ -74,6 +74,13 @@
       "when": 1771257067765,
       "tag": "0011_keen_iceman",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1771525465357,
+      "tag": "0012_add_tenant_thresholds",
+      "breakpoints": true
     }
   ]
 }
