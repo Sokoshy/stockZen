@@ -17,20 +17,73 @@ export interface ProductRow {
   purchasePrice?: number | null;
   quantity: number;
   lowStockThreshold: number | null;
+  customCriticalThreshold?: number | null;
+  customAttentionThreshold?: number | null;
   createdAt: string;
   updatedAt: string;
   syncStatus: "pending" | "synced" | "failed";
 }
 
-// Default fallback for backward compatibility
+export interface TenantThresholds {
+  defaultCriticalThreshold: number;
+  defaultAttentionThreshold: number;
+}
+
+function hasValidCustomThresholdPair(
+  criticalThreshold: number | null | undefined,
+  attentionThreshold: number | null | undefined
+): boolean {
+  return (
+    typeof criticalThreshold === "number" &&
+    Number.isInteger(criticalThreshold) &&
+    criticalThreshold > 0 &&
+    typeof attentionThreshold === "number" &&
+    Number.isInteger(attentionThreshold) &&
+    attentionThreshold > 0 &&
+    criticalThreshold < attentionThreshold
+  );
+}
+
+const DEFAULT_THRESHOLDS: TenantThresholds = {
+  defaultCriticalThreshold: 50,
+  defaultAttentionThreshold: 100,
+};
+
+export function resolveEffectiveThresholds(
+  product: ProductRow,
+  tenantThresholds: TenantThresholds = DEFAULT_THRESHOLDS
+): { criticalThreshold: number; attentionThreshold: number; mode: "defaults" | "custom" } {
+  if (
+    hasValidCustomThresholdPair(
+      product.customCriticalThreshold,
+      product.customAttentionThreshold
+    )
+  ) {
+    return {
+      criticalThreshold: product.customCriticalThreshold as number,
+      attentionThreshold: product.customAttentionThreshold as number,
+      mode: "custom",
+    };
+  }
+  return {
+    criticalThreshold: tenantThresholds.defaultCriticalThreshold,
+    attentionThreshold: tenantThresholds.defaultAttentionThreshold,
+    mode: "defaults",
+  };
+}
+
 const DEFAULT_LOW_STOCK_THRESHOLD = 100;
 
 export function isProductOnAlert(
   product: ProductRow,
   tenantDefaultAttentionThreshold = DEFAULT_LOW_STOCK_THRESHOLD
 ): boolean {
-  const threshold = product.lowStockThreshold ?? tenantDefaultAttentionThreshold;
-  return product.quantity <= threshold;
+  const tenantThresholds: TenantThresholds = {
+    defaultCriticalThreshold: 50,
+    defaultAttentionThreshold: tenantDefaultAttentionThreshold,
+  };
+  const { attentionThreshold } = resolveEffectiveThresholds(product, tenantThresholds);
+  return product.quantity <= attentionThreshold;
 }
 
 export function matchesCategory(product: ProductRow, category: string | null): boolean {
