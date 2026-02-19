@@ -101,6 +101,51 @@ async function ensureTenantThresholdColumns(target: ReturnType<typeof postgres>)
   `);
 }
 
+async function ensureProductCustomThresholdColumns(target: ReturnType<typeof postgres>): Promise<void> {
+  const productsTableExists = await target<{ exists: boolean }[]>`
+    select exists (
+      select 1
+      from information_schema.tables
+      where table_schema = 'public'
+        and table_name = 'products'
+    ) as exists
+  `;
+
+  if (!productsTableExists[0]?.exists) {
+    return;
+  }
+
+  await target.unsafe(`
+    ALTER TABLE products
+      ADD COLUMN IF NOT EXISTS custom_critical_threshold integer;
+    ALTER TABLE products
+      ADD COLUMN IF NOT EXISTS custom_attention_threshold integer;
+
+    ALTER TABLE products DROP CONSTRAINT IF EXISTS product_custom_critical_positive;
+    ALTER TABLE products DROP CONSTRAINT IF EXISTS product_custom_attention_positive;
+    ALTER TABLE products DROP CONSTRAINT IF EXISTS product_custom_critical_less_than_attention;
+
+    ALTER TABLE products
+      ADD CONSTRAINT product_custom_critical_positive
+        CHECK (custom_critical_threshold IS NULL OR custom_critical_threshold > 0);
+    ALTER TABLE products
+      ADD CONSTRAINT product_custom_attention_positive
+        CHECK (custom_attention_threshold IS NULL OR custom_attention_threshold > 0);
+    ALTER TABLE products
+      ADD CONSTRAINT product_custom_critical_less_than_attention
+        CHECK (
+          (
+            custom_critical_threshold IS NULL AND
+            custom_attention_threshold IS NULL
+          ) OR (
+            custom_critical_threshold IS NOT NULL AND
+            custom_attention_threshold IS NOT NULL AND
+            custom_critical_threshold < custom_attention_threshold
+          )
+        );
+  `);
+}
+
 export async function ensureTestDatabaseReady(): Promise<void> {
   const testDatabaseUrlRaw = getTestDatabaseUrl();
 
@@ -168,6 +213,7 @@ export async function ensureTestDatabaseReady(): Promise<void> {
     if (tableCheck[0]?.exists) {
       await ensureProductStory21Columns(target);
       await ensureTenantThresholdColumns(target);
+      await ensureProductCustomThresholdColumns(target);
       return;
     }
 
@@ -183,6 +229,7 @@ export async function ensureTestDatabaseReady(): Promise<void> {
 
     await ensureProductStory21Columns(target);
     await ensureTenantThresholdColumns(target);
+    await ensureProductCustomThresholdColumns(target);
   } catch {
   } finally {
     await target.end({ timeout: 5 });

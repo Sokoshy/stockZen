@@ -213,6 +213,8 @@ export const products = pgTable(
     purchasePrice: numeric("purchase_price", { precision: 10, scale: 2 }),
     quantity: integer("quantity").notNull().default(0),
     lowStockThreshold: integer("low_stock_threshold"),
+    customCriticalThreshold: integer("custom_critical_threshold"),
+    customAttentionThreshold: integer("custom_attention_threshold"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .$defaultFn(() => new Date())
       .notNull(),
@@ -227,6 +229,16 @@ export const products = pgTable(
     index("idx_products_sku").on(table.sku),
     index("idx_products_tenant_category").on(table.tenantId, table.category),
     index("idx_products_barcode").on(table.barcode),
+    check("product_custom_critical_positive", sql`${table.customCriticalThreshold} IS NULL OR ${table.customCriticalThreshold} > 0`),
+    check("product_custom_attention_positive", sql`${table.customAttentionThreshold} IS NULL OR ${table.customAttentionThreshold} > 0`),
+    check(
+      "product_custom_critical_less_than_attention",
+      sql`(
+        (${table.customCriticalThreshold} IS NULL AND ${table.customAttentionThreshold} IS NULL)
+        OR
+        (${table.customCriticalThreshold} IS NOT NULL AND ${table.customAttentionThreshold} IS NOT NULL AND ${table.customCriticalThreshold} < ${table.customAttentionThreshold})
+      )`
+    ),
   ]
 );
 

@@ -81,6 +81,20 @@
       "when": 1771525465357,
       "tag": "0012_add_tenant_thresholds",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1771610000000,
+      "tag": "0013_add_product_custom_thresholds",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1771613600000,
+      "tag": "0014_enforce_custom_threshold_pair",
+      "breakpoints": true
     }
   ]
 }
