@@ -11,6 +11,7 @@ import { useProductFilters } from "../hooks/use-product-filters";
 import { MobileProductList } from "../components/mobile-product-list";
 import { SyncStatusSummary } from "../components/sync-status-summary";
 import type { ProductRow } from "../utils/filter-utils";
+import { api } from "~/trpc/react";
 
 interface ProductsListClientProps {
   serverProducts: ProductOutput[];
@@ -63,6 +64,7 @@ export function ProductsListClient({
   actorRole,
   tenantId,
 }: ProductsListClientProps) {
+  const { data: tenantThresholds } = api.tenantThresholds.getTenantDefaultThresholds.useQuery();
   const canViewPurchasePrice = actorRole === "Admin" || actorRole === "Manager";
   const [localProducts, setLocalProducts] = useState<LocalProduct[]>([]);
   const [deletedProductIds, setDeletedProductIds] = useState<Set<string>>(new Set());
@@ -126,7 +128,7 @@ export function ProductsListClient({
     setSearchQuery,
     setOnAlert,
     clearFilters,
-  } = useProductFilters(mergedProducts);
+  } = useProductFilters(mergedProducts, tenantThresholds?.attentionThreshold);
 
   const handleProductDeleted = (productId: string) => {
     setDeletedProductIds((prev) => {

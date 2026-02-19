@@ -24,7 +24,10 @@ export interface UseProductFiltersResult {
   clearFilters: () => void;
 }
 
-export function useProductFilters(products: ProductRow[]): UseProductFiltersResult {
+export function useProductFilters(
+  products: ProductRow[],
+  tenantDefaultAttentionThreshold?: number
+): UseProductFiltersResult {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -52,8 +55,8 @@ export function useProductFilters(products: ProductRow[]): UseProductFiltersResu
   }, [urlFilters.category, urlFilters.onAlert, debouncedSearch]);
 
   const filteredProducts = useMemo(() => {
-    return filterProducts(products, filters);
-  }, [products, filters]);
+    return filterProducts(products, filters, tenantDefaultAttentionThreshold);
+  }, [products, filters, tenantDefaultAttentionThreshold]);
 
   const availableCategories = useMemo(() => {
     return extractCategories(products);

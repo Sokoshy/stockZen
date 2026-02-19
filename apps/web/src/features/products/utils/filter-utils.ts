@@ -22,10 +22,14 @@ export interface ProductRow {
   syncStatus: "pending" | "synced" | "failed";
 }
 
+// Default fallback for backward compatibility
 const DEFAULT_LOW_STOCK_THRESHOLD = 100;
 
-export function isProductOnAlert(product: ProductRow): boolean {
-  const threshold = product.lowStockThreshold ?? DEFAULT_LOW_STOCK_THRESHOLD;
+export function isProductOnAlert(
+  product: ProductRow,
+  tenantDefaultAttentionThreshold = DEFAULT_LOW_STOCK_THRESHOLD
+): boolean {
+  const threshold = product.lowStockThreshold ?? tenantDefaultAttentionThreshold;
   return product.quantity <= threshold;
 }
 
@@ -56,19 +60,24 @@ export function matchesSearch(product: ProductRow, query: string): boolean {
   return searchTerms.every((term) => nameLower.includes(term));
 }
 
-export function matchesOnAlertFilter(product: ProductRow, onAlert: boolean): boolean {
+export function matchesOnAlertFilter(
+  product: ProductRow,
+  onAlert: boolean,
+  tenantDefaultAttentionThreshold = DEFAULT_LOW_STOCK_THRESHOLD
+): boolean {
   if (!onAlert) return true;
-  return isProductOnAlert(product);
+  return isProductOnAlert(product, tenantDefaultAttentionThreshold);
 }
 
 export function filterProducts(
   products: ProductRow[],
-  filters: ProductFilterState
+  filters: ProductFilterState,
+  tenantDefaultAttentionThreshold = DEFAULT_LOW_STOCK_THRESHOLD
 ): ProductRow[] {
   return products.filter((product) => {
     if (!matchesCategory(product, filters.category)) return false;
     if (!matchesSearch(product, filters.searchQuery)) return false;
-    if (!matchesOnAlertFilter(product, filters.onAlert)) return false;
+    if (!matchesOnAlertFilter(product, filters.onAlert, tenantDefaultAttentionThreshold)) return false;
     return true;
   });
 }

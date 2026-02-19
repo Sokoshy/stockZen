@@ -104,6 +104,12 @@ describe("isProductOnAlert", () => {
     expect(isProductOnAlert(product)).toBe(true);
   });
 
+  it("uses tenant default attention threshold when product threshold is not set", () => {
+    const product = mockProduct({ quantity: 120, lowStockThreshold: null });
+    expect(isProductOnAlert(product, 150)).toBe(true);
+    expect(isProductOnAlert(product, 100)).toBe(false);
+  });
+
   it("returns true when quantity is at or below 0", () => {
     const product = mockProduct({ quantity: 0, lowStockThreshold: null });
     expect(isProductOnAlert(product)).toBe(true);
@@ -136,6 +142,12 @@ describe("matchesOnAlertFilter", () => {
     const product = mockProduct({ quantity: 500 });
     expect(matchesOnAlertFilter(product, true)).toBe(false);
   });
+
+  it("respects tenant default attention threshold in on-alert filtering", () => {
+    const product = mockProduct({ quantity: 120, lowStockThreshold: null });
+    expect(matchesOnAlertFilter(product, true, 150)).toBe(true);
+    expect(matchesOnAlertFilter(product, true, 100)).toBe(false);
+  });
 });
 
 describe("filterProducts", () => {
@@ -155,6 +167,26 @@ describe("filterProducts", () => {
     const result = filterProducts(products, filters);
     expect(result).toHaveLength(1);
     expect(result[0]?.id).toBe("p1");
+  });
+
+  it("uses tenant default attention threshold when filtering on alert", () => {
+    const products = [
+      mockProduct({ id: "p1", name: "Flour", quantity: 130, lowStockThreshold: null }),
+      mockProduct({ id: "p2", name: "Sugar", quantity: 80, lowStockThreshold: null }),
+    ];
+
+    const filters: ProductFilterState = {
+      category: null,
+      searchQuery: "",
+      onAlert: true,
+    };
+
+    const withTenantDefault = filterProducts(products, filters, 150);
+    const withLegacyDefault = filterProducts(products, filters);
+
+    expect(withTenantDefault).toHaveLength(2);
+    expect(withLegacyDefault).toHaveLength(1);
+    expect(withLegacyDefault[0]?.id).toBe("p2");
   });
 
   it("returns all products when no filters applied", () => {
