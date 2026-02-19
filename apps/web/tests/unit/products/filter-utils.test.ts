@@ -8,8 +8,9 @@ import {
   extractCategories,
   getFilterStateFromUrl,
   buildFilterUrlParams,
+  resolveEffectiveThresholds,
 } from "~/features/products/utils/filter-utils";
-import type { ProductRow, ProductFilterState } from "~/features/products/utils/filter-utils";
+import type { ProductRow, ProductFilterState, TenantThresholds } from "~/features/products/utils/filter-utils";
 
 const mockProduct = (overrides: Partial<ProductRow> = {}): ProductRow => ({
   id: "p1",
@@ -24,6 +25,8 @@ const mockProduct = (overrides: Partial<ProductRow> = {}): ProductRow => ({
   purchasePrice: 5,
   quantity: 50,
   lowStockThreshold: null,
+  customCriticalThreshold: null,
+  customAttentionThreshold: null,
   createdAt: "2026-02-15T10:00:00.000Z",
   updatedAt: "2026-02-15T10:00:00.000Z",
   syncStatus: "synced",
@@ -115,15 +118,101 @@ describe("isProductOnAlert", () => {
     expect(isProductOnAlert(product)).toBe(true);
   });
 
-  it("uses custom lowStockThreshold when set", () => {
-    const product = mockProduct({ quantity: 150, lowStockThreshold: 200 });
-    // Quantity 150 is below threshold 200, so on alert
+  it("uses custom thresholds when customCriticalThreshold and customAttentionThreshold are set", () => {
+    const product = mockProduct({ 
+      quantity: 30, 
+      lowStockThreshold: null,
+      customCriticalThreshold: 25,
+      customAttentionThreshold: 50 
+    });
     expect(isProductOnAlert(product)).toBe(true);
   });
 
-  it("returns false when quantity is above custom threshold", () => {
-    const product = mockProduct({ quantity: 250, lowStockThreshold: 200 });
+  it("ignores lowStockThreshold when custom thresholds are set", () => {
+    const product = mockProduct({ 
+      quantity: 150, 
+      lowStockThreshold: 200,
+      customCriticalThreshold: 25,
+      customAttentionThreshold: 50 
+    });
     expect(isProductOnAlert(product)).toBe(false);
+  });
+});
+
+describe("resolveEffectiveThresholds", () => {
+  const defaultTenantThresholds: TenantThresholds = {
+    defaultCriticalThreshold: 50,
+    defaultAttentionThreshold: 100,
+  };
+
+  it("returns tenant defaults when product has no custom thresholds", () => {
+    const product = mockProduct({ 
+      customCriticalThreshold: null, 
+      customAttentionThreshold: null 
+    });
+    const result = resolveEffectiveThresholds(product, defaultTenantThresholds);
+    
+    expect(result.mode).toBe("defaults");
+    expect(result.criticalThreshold).toBe(50);
+    expect(result.attentionThreshold).toBe(100);
+  });
+
+  it("returns custom thresholds when both are set", () => {
+    const product = mockProduct({ 
+      customCriticalThreshold: 25, 
+      customAttentionThreshold: 75 
+    });
+    const result = resolveEffectiveThresholds(product, defaultTenantThresholds);
+    
+    expect(result.mode).toBe("custom");
+    expect(result.criticalThreshold).toBe(25);
+    expect(result.attentionThreshold).toBe(75);
+  });
+
+  it("returns defaults when only customCriticalThreshold is set", () => {
+    const product = mockProduct({ 
+      customCriticalThreshold: 25, 
+      customAttentionThreshold: null 
+    });
+    const result = resolveEffectiveThresholds(product, defaultTenantThresholds);
+    
+    expect(result.mode).toBe("defaults");
+    expect(result.criticalThreshold).toBe(50);
+    expect(result.attentionThreshold).toBe(100);
+  });
+
+  it("returns defaults when only customAttentionThreshold is set", () => {
+    const product = mockProduct({ 
+      customCriticalThreshold: null, 
+      customAttentionThreshold: 75 
+    });
+    const result = resolveEffectiveThresholds(product, defaultTenantThresholds);
+    
+    expect(result.mode).toBe("defaults");
+  });
+
+  it("uses default tenant thresholds when not provided", () => {
+    const product = mockProduct({ 
+      customCriticalThreshold: null, 
+      customAttentionThreshold: null 
+    });
+    const result = resolveEffectiveThresholds(product);
+    
+    expect(result.mode).toBe("defaults");
+    expect(result.criticalThreshold).toBe(50);
+    expect(result.attentionThreshold).toBe(100);
+  });
+
+  it("falls back to defaults for invalid custom threshold values", () => {
+    const product = mockProduct({ 
+      customCriticalThreshold: 0, 
+      customAttentionThreshold: 0 
+    });
+    const result = resolveEffectiveThresholds(product, defaultTenantThresholds);
+    
+    expect(result.mode).toBe("defaults");
+    expect(result.criticalThreshold).toBe(50);
+    expect(result.attentionThreshold).toBe(100);
   });
 });
 

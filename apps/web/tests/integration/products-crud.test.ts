@@ -104,4 +104,41 @@ describe("Products CRUD", () => {
 
     expect(stored?.purchasePrice).toBe("2.00");
   });
+
+  it("rejects invalid custom threshold update payloads", async () => {
+    const admin = await createTestTenant();
+    const adminCtx = await createTenantContext(admin);
+
+    const created = await adminCtx.caller.products.create({
+      name: "Yeast",
+      category: "Raw Materials",
+      unit: "g",
+      price: 3,
+      quantity: 10,
+    });
+
+    await expect(
+      adminCtx.caller.products.update({
+        id: created.id,
+        data: {
+          thresholdMode: "custom",
+          customCriticalThreshold: 20,
+        },
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
+
+    await expect(
+      adminCtx.caller.products.update({
+        id: created.id,
+        data: {
+          customCriticalThreshold: 20,
+          customAttentionThreshold: 40,
+        },
+      })
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
+  });
 });

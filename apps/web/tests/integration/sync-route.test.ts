@@ -387,4 +387,87 @@ describe("POST /api/sync", () => {
     expect(body.results[0].serverState?.id).toBe(productId);
     expect(body.results[0].serverState?.name).toContain("Test Product");
   });
+
+  it("returns validation_error when syncing custom thresholds with an invalid pair", async () => {
+    vi.mocked(auth.api.getSession).mockResolvedValue(
+      mockSession(userId, `test-${userId}@example.com`, tenantId)
+    );
+
+    const operationId = crypto.randomUUID();
+    const request = new NextRequest("http://localhost/api/sync", {
+      method: "POST",
+      headers: new Headers({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        operations: [
+          {
+            operationId,
+            idempotencyKey: operationId,
+            entityId: operationId,
+            entityType: "product",
+            operationType: "create",
+            tenantId,
+            payload: {
+              tenantId,
+              name: "Invalid Threshold Product",
+              category: "Test",
+              unit: "pcs",
+              price: 10,
+              thresholdMode: "custom",
+              customCriticalThreshold: 40,
+              customAttentionThreshold: 20,
+            },
+          },
+        ],
+      }),
+    });
+
+    const response = await POST(request);
+    expect(response.status).toBe(200);
+
+    const body = await response.json();
+    expect(body.results[0].status).toBe("validation_error");
+    expect(body.results[0].message).toContain("Critical threshold must be less than attention threshold");
+
+    const syncedProduct = await db.query.products.findFirst({
+      where: eq(products.id, operationId),
+    });
+    expect(syncedProduct).toBeUndefined();
+  });
+
+  it("returns validation_error when syncing custom thresholds update without thresholdMode", async () => {
+    vi.mocked(auth.api.getSession).mockResolvedValue(
+      mockSession(userId, `test-${userId}@example.com`, tenantId)
+    );
+
+    const request = new NextRequest("http://localhost/api/sync", {
+      method: "POST",
+      headers: new Headers({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        operations: [
+          {
+            operationId: crypto.randomUUID(),
+            idempotencyKey: crypto.randomUUID(),
+            entityId: productId,
+            entityType: "product",
+            operationType: "update",
+            tenantId,
+            payload: {
+              tenantId,
+              clientUpdatedAt: new Date().toISOString(),
+              updatedFields: {
+                customCriticalThreshold: 10,
+                customAttentionThreshold: 20,
+              },
+            },
+          },
+        ],
+      }),
+    });
+
+    const response = await POST(request);
+    expect(response.status).toBe(400);
+
+    const body = await response.json();
+    expect(body.code).toBe("VALIDATION_ERROR");
+  });
 });
