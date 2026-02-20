@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 
 import {
   tenantDefaultThresholdsOutputSchema,
@@ -8,7 +8,8 @@ import {
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import { canManageTenantMembers } from "~/server/auth/rbac-policy";
 import type { db as rootDb } from "~/server/db";
-import { tenants } from "~/server/db/schema";
+import { products, tenants } from "~/server/db/schema";
+import { recomputeAlertsForProducts } from "~/server/services/alert-service";
 
 function assertTenantId(tenantId: string | null): string {
   if (!tenantId) {
@@ -111,6 +112,22 @@ export const tenantThresholdsRouter = createTRPCRouter({
           code: "NOT_FOUND",
           message: "Failed to update tenant thresholds",
         });
+      }
+
+      const productsUsingDefaults = await ctx.db
+        .select({ id: products.id })
+        .from(products)
+        .where(
+          and(
+            eq(products.tenantId, tenantId),
+            isNull(products.customCriticalThreshold),
+            isNull(products.customAttentionThreshold)
+          )
+        );
+
+      const productIds = productsUsingDefaults.map((p) => p.id);
+      if (productIds.length > 0) {
+        await recomputeAlertsForProducts(ctx.db, tenantId, productIds);
       }
 
       return updated;

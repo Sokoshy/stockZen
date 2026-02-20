@@ -1,6 +1,7 @@
-import { eq, and } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { products, stockMovements, tenants } from "~/server/db/schema";
 import { logger } from "~/server/logger";
+import { updateAlertLifecycle } from "~/server/services/alert-service";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "~/server/db/schema";
 import type {
@@ -180,6 +181,13 @@ async function processProductCreate(
 
   logger.info({ productId: newProduct.id, tenantId }, "Product created via sync");
 
+  await updateAlertLifecycle({
+    db,
+    tenantId,
+    productId: newProduct.id,
+    currentStock: newProduct.quantity,
+  });
+
   return {
     status: "success",
     serverState: buildServerProductState(newProduct),
@@ -221,6 +229,7 @@ async function processProductUpdate(
   const hasCustomAttentionInPayload =
     updatedFields !== undefined &&
     Object.prototype.hasOwnProperty.call(updatedFields, "customAttentionThreshold");
+  const shouldRecomputeAlert = updatedFields?.thresholdMode !== undefined;
 
   if (updatedFields?.thresholdMode === undefined) {
     if (hasCustomCriticalInPayload || hasCustomAttentionInPayload) {
@@ -304,6 +313,15 @@ async function processProductUpdate(
   }
 
   logger.info({ productId: updatedProduct.id, tenantId }, "Product updated via sync");
+
+  if (shouldRecomputeAlert) {
+    await updateAlertLifecycle({
+      db,
+      tenantId,
+      productId: updatedProduct.id,
+      currentStock: updatedProduct.quantity,
+    });
+  }
 
   return {
     status: "success",
@@ -392,44 +410,68 @@ async function processStockMovementCreate(
   const type = payload.type as "entry" | "exit";
   const quantity = payload.quantity as number;
 
-  const [newMovement] = await db
-    .insert(stockMovements)
-    .values({
+  const result = await db.transaction(async (tx) => {
+    const [newMovement] = await tx
+      .insert(stockMovements)
+      .values({
+        tenantId,
+        productId,
+        userId,
+        type,
+        quantity,
+        idempotencyKey,
+      })
+      .returning();
+
+    if (!newMovement) {
+      throw new Error("Failed to create movement");
+    }
+
+    const stockChange = type === "entry" ? quantity : -quantity;
+    const [updatedProduct] = await tx
+      .update(products)
+      .set({
+        quantity: sql`${products.quantity} + ${stockChange}`,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(products.id, productId), eq(products.tenantId, tenantId)))
+      .returning({
+        quantity: products.quantity,
+      });
+
+    if (!updatedProduct) {
+      throw new Error("Product not found");
+    }
+
+    const newQuantity = updatedProduct.quantity;
+
+    await updateAlertLifecycle({
+      db: tx,
       tenantId,
       productId,
-      userId,
-      type,
-      quantity,
-      idempotencyKey,
-    })
-    .returning();
+      currentStock: newQuantity,
+    });
 
-  if (!newMovement) {
+    return { movement: newMovement, newQuantity };
+  });
+
+  if (!result) {
     return { status: "validation_error", message: "Failed to create movement" };
   }
 
-  const stockChange = type === "entry" ? quantity : -quantity;
-  await db
-    .update(products)
-    .set({
-      quantity: product.quantity + stockChange,
-      updatedAt: new Date(),
-    })
-    .where(and(eq(products.id, productId), eq(products.tenantId, tenantId)));
-
   logger.info(
-    { movementId: newMovement.id, productId, type, quantity, tenantId },
+    { movementId: result.movement.id, productId, type, quantity, tenantId },
     "Stock movement created via sync"
   );
 
   return {
     status: "success",
     serverState: {
-      id: newMovement.id,
-      productId: newMovement.productId,
-      type: newMovement.type,
-      quantity: newMovement.quantity,
-      createdAt: newMovement.createdAt,
+      id: result.movement.id,
+      productId: result.movement.productId,
+      type: result.movement.type,
+      quantity: result.movement.quantity,
+      createdAt: result.movement.createdAt,
     },
   };
 }

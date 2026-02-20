@@ -3,8 +3,8 @@ import { NextRequest } from "next/server";
 import { POST } from "~/app/api/sync/route";
 import { auth } from "~/server/better-auth";
 import { db } from "~/server/db";
-import { user, tenants, tenantMemberships, products, stockMovements } from "~/server/db/schema";
-import { eq } from "drizzle-orm";
+import { alerts, products, stockMovements, tenantMemberships, tenants, user } from "~/server/db/schema";
+import { and, eq } from "drizzle-orm";
 
 vi.mock("~/server/better-auth", () => ({
   auth: {
@@ -300,6 +300,77 @@ describe("POST /api/sync", () => {
     expect(movementsAfter).toHaveLength(1);
   });
 
+  it("does not create duplicate active alerts for idempotent sync replay", async () => {
+    vi.mocked(auth.api.getSession).mockResolvedValue(mockSession(userId, `test-${userId}@example.com`, tenantId));
+
+    const operationId = crypto.randomUUID();
+    const idempotencyKey = `idem-alert-${operationId}`;
+
+    const request = new NextRequest("http://localhost/api/sync", {
+      method: "POST",
+      headers: new Headers({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        operations: [{
+          operationId,
+          idempotencyKey: operationId,
+          entityId: crypto.randomUUID(),
+          entityType: "stockMovement",
+          operationType: "create",
+          tenantId,
+          payload: {
+            tenantId,
+            productId,
+            type: "exit",
+            quantity: 70,
+            idempotencyKey,
+          },
+        }],
+      }),
+    });
+
+    const firstResponse = await POST(request);
+    expect(firstResponse.status).toBe(200);
+
+    const duplicateRequest = new NextRequest("http://localhost/api/sync", {
+      method: "POST",
+      headers: new Headers({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        operations: [{
+          operationId,
+          idempotencyKey: operationId,
+          entityId: crypto.randomUUID(),
+          entityType: "stockMovement",
+          operationType: "create",
+          tenantId,
+          payload: {
+            tenantId,
+            productId,
+            type: "exit",
+            quantity: 70,
+            idempotencyKey,
+          },
+        }],
+      }),
+    });
+
+    const duplicateResponse = await POST(duplicateRequest);
+    expect(duplicateResponse.status).toBe(200);
+
+    const duplicateBody = await duplicateResponse.json();
+    expect(duplicateBody.results[0].status).toBe("duplicate");
+
+    const activeAlerts = await db.query.alerts.findMany({
+      where: and(
+        eq(alerts.tenantId, tenantId),
+        eq(alerts.productId, productId),
+        eq(alerts.status, "active")
+      ),
+    });
+
+    expect(activeAlerts).toHaveLength(1);
+    expect(activeAlerts[0]?.level).toBe("red");
+  });
+
   it("returns validation error for invalid request", async () => {
     vi.mocked(auth.api.getSession).mockResolvedValue(mockSession(userId, `test-${userId}@example.com`, tenantId));
 
@@ -469,5 +540,57 @@ describe("POST /api/sync", () => {
 
     const body = await response.json();
     expect(body.code).toBe("VALIDATION_ERROR");
+  });
+
+  it("recomputes alert state after sync threshold update", async () => {
+    vi.mocked(auth.api.getSession).mockResolvedValue(
+      mockSession(userId, `test-${userId}@example.com`, tenantId)
+    );
+
+    const thresholdUpdateOperationId = crypto.randomUUID();
+
+    const request = new NextRequest("http://localhost/api/sync", {
+      method: "POST",
+      headers: new Headers({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        operations: [
+          {
+            operationId: thresholdUpdateOperationId,
+            idempotencyKey: thresholdUpdateOperationId,
+            entityId: productId,
+            entityType: "product",
+            operationType: "update",
+            tenantId,
+            payload: {
+              tenantId,
+              clientUpdatedAt: new Date().toISOString(),
+              updatedFields: {
+                thresholdMode: "custom",
+                customCriticalThreshold: 10,
+                customAttentionThreshold: 150,
+              },
+            },
+          },
+        ],
+      }),
+    });
+
+    const response = await POST(request);
+    expect(response.status).toBe(200);
+
+    const body = await response.json();
+    expect(body.results[0].status).toBe("success");
+
+    const activeAlerts = await db.query.alerts.findMany({
+      where: and(
+        eq(alerts.tenantId, tenantId),
+        eq(alerts.productId, productId),
+        eq(alerts.status, "active")
+      ),
+    });
+
+    expect(activeAlerts).toHaveLength(1);
+    expect(activeAlerts[0]?.level).toBe("orange");
+    expect(activeAlerts[0]?.currentStock).toBe(100);
   });
 });
