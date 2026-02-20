@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { alerts, products, tenants } from "~/server/db/schema";
 import { logger } from "~/server/logger";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -6,6 +6,8 @@ import type * as schema from "~/server/db/schema";
 import type { AlertLevel } from "~/schemas/alerts";
 
 type AlertDbClient = PostgresJsDatabase<typeof schema>;
+
+export const SNOOZE_DURATION_HOURS = 8;
 
 export interface EffectiveThresholds {
   criticalThreshold: number;
@@ -22,6 +24,30 @@ export interface ProductWithThresholds {
 export interface TenantThresholds {
   defaultCriticalThreshold: number;
   defaultAttentionThreshold: number;
+}
+
+export function isAlertSnoozed(snoozedUntil: Date | null, now: Date): boolean {
+  return snoozedUntil !== null && snoozedUntil > now;
+}
+
+export function calculateSnoozeExpiry(now: Date): Date {
+  return new Date(now.getTime() + SNOOZE_DURATION_HOURS * 60 * 60 * 1000);
+}
+
+export function shouldCancelSnoozeOnWorsening(
+  currentLevel: AlertLevel,
+  newLevel: AlertLevel
+): boolean {
+  return currentLevel === "orange" && newLevel === "red";
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: string }).code === "23505"
+  );
 }
 
 export function resolveEffectiveThresholds(
@@ -142,6 +168,8 @@ export async function updateAlertLifecycle(
         .set({
           status: "closed",
           currentStock,
+          handledAt: null,
+          snoozedUntil: null,
           updatedAt: new Date(),
           closedAt: new Date(),
         })
@@ -155,32 +183,90 @@ export async function updateAlertLifecycle(
     return;
   }
 
-  const [upsertedAlert] = await db
-    .insert(alerts)
-    .values({
-      tenantId,
-      productId,
-      level: newLevel,
-      status: "active",
-      stockAtCreation: currentStock,
-      currentStock,
-    })
-    .onConflictDoUpdate({
-      target: [alerts.tenantId, alerts.productId],
-      targetWhere: eq(alerts.status, "active"),
-      set: {
+  if (existingActiveAlert) {
+    const snoozed = isAlertSnoozed(existingActiveAlert.snoozedUntil, new Date());
+
+    if (snoozed && shouldCancelSnoozeOnWorsening(existingActiveAlert.level, newLevel)) {
+      await db
+        .update(alerts)
+        .set({
+          level: "red",
+          currentStock,
+          snoozedUntil: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(alerts.id, existingActiveAlert.id));
+
+      logger.info(
+        { alertId: existingActiveAlert.id, productId, tenantId, newLevel: "red" },
+        "Snooze cancelled - alert worsened from orange to red"
+      );
+      return;
+    }
+
+    await db
+      .update(alerts)
+      .set({
         level: newLevel,
         currentStock,
         updatedAt: new Date(),
-        closedAt: null,
-      },
-    })
-    .returning();
+      })
+      .where(eq(alerts.id, existingActiveAlert.id));
 
-  if (upsertedAlert) {
     logger.info(
-      { alertId: upsertedAlert.id, productId, tenantId, level: newLevel },
-      existingActiveAlert ? "Alert updated" : "New alert created"
+      { alertId: existingActiveAlert.id, productId, tenantId, level: newLevel },
+      "Alert updated"
+    );
+    return;
+  }
+
+  try {
+    const [upsertedAlert] = await db
+      .insert(alerts)
+      .values({
+        tenantId,
+        productId,
+        level: newLevel,
+        status: "active",
+        stockAtCreation: currentStock,
+        currentStock,
+      })
+      .returning();
+
+    if (upsertedAlert) {
+      logger.info(
+        { alertId: upsertedAlert.id, productId, tenantId, level: newLevel },
+        "New alert created"
+      );
+    }
+  } catch (error) {
+    if (!isUniqueViolation(error)) {
+      throw error;
+    }
+
+    const [updatedExistingAlert] = await db
+      .update(alerts)
+      .set({
+        level: newLevel,
+        currentStock,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(alerts.tenantId, tenantId),
+          eq(alerts.productId, productId),
+          eq(alerts.status, "active")
+        )
+      )
+      .returning({ id: alerts.id });
+
+    if (!updatedExistingAlert) {
+      throw error;
+    }
+
+    logger.info(
+      { alertId: updatedExistingAlert.id, productId, tenantId, level: newLevel },
+      "Concurrent alert creation resolved by updating active alert"
     );
   }
 }
@@ -236,9 +322,158 @@ export async function recomputeAlertsForProducts(
   }
 }
 
+export interface MarkHandledInput {
+  db: AlertDbClient;
+  tenantId: string;
+  alertId: string;
+}
+
+export async function markHandled(input: MarkHandledInput): Promise<void> {
+  const { db, tenantId, alertId } = input;
+
+  const [updatedAlert] = await db
+    .update(alerts)
+    .set({
+      status: "closed",
+      handledAt: new Date(),
+      snoozedUntil: null,
+      updatedAt: new Date(),
+      closedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(alerts.id, alertId),
+        eq(alerts.tenantId, tenantId),
+        eq(alerts.status, "active")
+      )
+    )
+    .returning({ id: alerts.id });
+
+  if (updatedAlert) {
+    logger.info({ alertId, tenantId }, "Alert marked as handled");
+    return;
+  }
+
+  const existingAlert = await db.query.alerts.findFirst({
+    where: and(eq(alerts.id, alertId), eq(alerts.tenantId, tenantId)),
+    columns: { id: true, status: true },
+  });
+
+  if (!existingAlert) {
+    throw new Error("NOT_FOUND");
+  }
+
+  throw new Error("BAD_REQUEST");
+}
+
+export interface SnoozeAlertInput {
+  db: AlertDbClient;
+  tenantId: string;
+  alertId: string;
+}
+
+export async function snoozeForEightHours(input: SnoozeAlertInput): Promise<void> {
+  const { db, tenantId, alertId } = input;
+
+  const snoozedUntil = calculateSnoozeExpiry(new Date());
+
+  const [updatedAlert] = await db
+    .update(alerts)
+    .set({
+      snoozedUntil,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(alerts.id, alertId),
+        eq(alerts.tenantId, tenantId),
+        eq(alerts.status, "active")
+      )
+    )
+    .returning({ id: alerts.id });
+
+  if (updatedAlert) {
+    logger.info({ alertId, tenantId, snoozedUntil }, "Alert snoozed for 8 hours");
+    return;
+  }
+
+  const existingAlert = await db.query.alerts.findFirst({
+    where: and(eq(alerts.id, alertId), eq(alerts.tenantId, tenantId)),
+    columns: { id: true, status: true },
+  });
+
+  if (!existingAlert) {
+    throw new Error("NOT_FOUND");
+  }
+
+  throw new Error("BAD_REQUEST");
+}
+
+export interface ListActiveAlertsInput {
+  db: AlertDbClient;
+  tenantId: string;
+}
+
+export interface ActiveAlertOutput {
+  id: string;
+  productId: string;
+  productName: string;
+  level: AlertLevel;
+  currentStock: number;
+  snoozedUntil: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export async function listActiveAlerts(
+  input: ListActiveAlertsInput
+): Promise<ActiveAlertOutput[]> {
+  const { db, tenantId } = input;
+
+  const activeAlerts = await db
+    .select({
+      id: alerts.id,
+      productId: alerts.productId,
+      productName: products.name,
+      level: alerts.level,
+      currentStock: alerts.currentStock,
+      snoozedUntil: alerts.snoozedUntil,
+      createdAt: alerts.createdAt,
+      updatedAt: alerts.updatedAt,
+    })
+    .from(alerts)
+    .innerJoin(products, eq(alerts.productId, products.id))
+    .where(
+      and(
+        eq(alerts.tenantId, tenantId),
+        eq(alerts.status, "active"),
+        or(
+          isNull(alerts.snoozedUntil),
+          sql`${alerts.snoozedUntil} <= now()`
+        )
+      )
+    )
+    .orderBy(
+      sql`case
+        when ${alerts.level} = 'red' then 0
+        when ${alerts.level} = 'orange' then 1
+        else 2
+      end`,
+      desc(alerts.updatedAt)
+    );
+
+  return activeAlerts;
+}
+
 export const alertService = {
   updateAlertLifecycle,
   recomputeAlertsForProducts,
   resolveEffectiveThresholds,
   classifyAlertLevel,
+  markHandled,
+  snoozeForEightHours,
+  listActiveAlerts,
+  isAlertSnoozed,
+  calculateSnoozeExpiry,
+  shouldCancelSnoozeOnWorsening,
 };
