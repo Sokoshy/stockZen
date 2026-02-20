@@ -63,7 +63,7 @@ development_status:
   epic-3: in-progress
   3-1-configure-account-default-stock-thresholds-absolute-quantities: done
   3-2-configure-per-product-thresholds-optional-override-of-defaults: done
-  3-3-automatic-alert-generation-r-o-g-classification-one-active-alert-per-product: backlog
+  3-3-automatic-alert-generation-r-o-g-classification-one-active-alert-per-product: done
   3-4-alert-triage-handled-vs-snoozed-ignored: backlog
   3-5-email-notifications-for-critical-red-alerts-all-tenant-members: backlog
   epic-3-retrospective: optional
