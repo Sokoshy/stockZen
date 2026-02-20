@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import {
@@ -8,6 +8,8 @@ import {
   productInputSchema,
   productUpdateDataSchema,
   productOutputSchema,
+  productWithAlertOutputSchema,
+  type ProductWithAlertOutput,
 } from "~/schemas/products";
 import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
 import {
@@ -16,8 +18,13 @@ import {
   serializeProductsForRole,
 } from "~/server/auth/product-serializer";
 import { canWritePurchasePrice } from "~/server/auth/rbac-policy";
-import { products } from "~/server/db/schema";
+import { products, alerts, tenants } from "~/server/db/schema";
 import { logger } from "~/server/logger";
+import { updateAlertLifecycle, classifyAlertLevel, resolveEffectiveThresholds } from "~/server/services/alert-service";
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import type * as schema from "~/server/db/schema";
+
+type AlertDbClient = PostgresJsDatabase<typeof schema>;
 
 type ProductInput = z.infer<typeof productInputBaseSchema>;
 type ProductUpdateData = z.infer<typeof productUpdateDataSchema>;
@@ -40,6 +47,102 @@ const operatorProductColumns = {
   updatedAt: products.updatedAt,
   deletedAt: products.deletedAt,
 };
+
+interface ProductRow {
+  id: string;
+  tenantId: string;
+  name: string;
+  description: string | null;
+  sku: string | null;
+  category: string | null;
+  unit: string | null;
+  barcode: string | null;
+  price: string | number;
+  quantity: number;
+  lowStockThreshold: number | null;
+  customCriticalThreshold: number | null;
+  customAttentionThreshold: number | null;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt: Date | null;
+  purchasePrice?: string | number | null;
+}
+
+async function attachAlertMetadata(
+  db: AlertDbClient,
+  tenantId: string,
+  productList: ProductRow[],
+  tenantThresholds: { defaultCriticalThreshold: number; defaultAttentionThreshold: number }
+): Promise<ProductWithAlertOutput[]> {
+  const productIds = productList.map((p) => p.id);
+
+  const activeAlerts = productIds.length > 0
+    ? await db.query.alerts.findMany({
+        where: (a, { and: andExpr, eq: eqExpr }) =>
+          andExpr(
+            eqExpr(a.tenantId, tenantId),
+            eqExpr(a.status, "active"),
+            inArray(a.productId, productIds)
+          ),
+      })
+    : [];
+
+  const alertMap = new Map(activeAlerts.map((a) => [a.productId, a]));
+
+  return productList.map((product) => {
+    const activeAlert = alertMap.get(product.id);
+    const thresholds = resolveEffectiveThresholds(
+      {
+        quantity: product.quantity,
+        customCriticalThreshold: product.customCriticalThreshold,
+        customAttentionThreshold: product.customAttentionThreshold,
+      },
+      tenantThresholds
+    );
+    const alertLevel = classifyAlertLevel(
+      product.quantity,
+      thresholds.criticalThreshold,
+      thresholds.attentionThreshold
+    );
+
+    const baseProduct = {
+      id: product.id,
+      tenantId: product.tenantId,
+      name: product.name,
+      description: product.description,
+      sku: product.sku,
+      category: product.category,
+      unit: product.unit,
+      barcode: product.barcode,
+      price: typeof product.price === "string" ? Number(product.price) : product.price,
+      quantity: product.quantity,
+      lowStockThreshold: product.lowStockThreshold,
+      thresholdMode: thresholds.mode as "defaults" | "custom",
+      customCriticalThreshold: product.customCriticalThreshold,
+      customAttentionThreshold: product.customAttentionThreshold,
+      createdAt: product.createdAt.toISOString(),
+      updatedAt: product.updatedAt.toISOString(),
+      deletedAt: product.deletedAt?.toISOString() ?? null,
+      alertLevel,
+      hasActiveAlert: activeAlert !== undefined,
+      activeAlertUpdatedAt: activeAlert?.updatedAt.toISOString() ?? null,
+    };
+
+    if ("purchasePrice" in product && product.purchasePrice !== undefined) {
+      return {
+        ...baseProduct,
+        purchasePrice:
+          product.purchasePrice === null
+            ? null
+            : typeof product.purchasePrice === "string"
+              ? Number(product.purchasePrice)
+              : product.purchasePrice,
+      };
+    }
+
+    return baseProduct;
+  });
+}
 
 export const productsRouter = createTRPCRouter({
   list: protectedProcedure.output(listProductsOutputSchema).query(async ({ ctx }) => {
@@ -73,10 +176,30 @@ export const productsRouter = createTRPCRouter({
             orderBy: desc(products.createdAt),
           });
 
+    const tenant = await ctx.db.query.tenants.findFirst({
+      where: (t, { eq: eqExpr }) => eqExpr(t.id, tenantId),
+      columns: {
+        defaultCriticalThreshold: true,
+        defaultAttentionThreshold: true,
+      },
+    });
+
+    const tenantThresholds = {
+      defaultCriticalThreshold: tenant?.defaultCriticalThreshold ?? 50,
+      defaultAttentionThreshold: tenant?.defaultAttentionThreshold ?? 100,
+    };
+
+    const productsWithAlerts = await attachAlertMetadata(
+      ctx.db,
+      tenantId,
+      productList as ProductRow[],
+      tenantThresholds
+    );
+
     logger.debug({ userId, tenantId, role, productCount: productList.length }, "Products listed");
 
     return {
-      products: serializeProductsForRole(productList, role),
+      products: productsWithAlerts,
       actorRole: role,
     };
   }),
@@ -304,6 +427,15 @@ export const productsRouter = createTRPCRouter({
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: "Failed to update product",
+        });
+      }
+
+      if (fullData.thresholdMode !== undefined) {
+        await updateAlertLifecycle({
+          db: ctx.db,
+          tenantId,
+          productId: input.id,
+          currentStock: updatedProduct.quantity,
         });
       }
 
