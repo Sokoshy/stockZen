@@ -95,6 +95,20 @@
       "when": 1771613600000,
       "tag": "0014_enforce_custom_threshold_pair",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1771700000000,
+      "tag": "0015_alerts_table",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1771786400000,
+      "tag": "0016_alert_triage_fields",
+      "breakpoints": true
     }
   ]
 }

@@ -269,6 +269,8 @@ export const alerts = pgTable(
     status: alertStatusEnum("status").notNull().default("active"),
     stockAtCreation: integer("stock_at_creation").notNull(),
     currentStock: integer("current_stock").notNull(),
+    handledAt: timestamp("handled_at", { withTimezone: true }),
+    snoozedUntil: timestamp("snoozed_until", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .$defaultFn(() => new Date())
       .notNull(),
