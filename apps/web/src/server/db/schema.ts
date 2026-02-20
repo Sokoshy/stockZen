@@ -248,6 +248,46 @@ export const products = pgTable(
 
 export const movementTypeEnum = pgEnum("movement_type", ["entry", "exit"]);
 
+// ============================================
+// Alerts Table
+// ============================================
+
+export const alertLevelEnum = pgEnum("alert_level", ["red", "orange", "green"]);
+export const alertStatusEnum = pgEnum("alert_status", ["active", "closed"]);
+
+export const alerts = pgTable(
+  "alerts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    level: alertLevelEnum("level").notNull(),
+    status: alertStatusEnum("status").notNull().default("active"),
+    stockAtCreation: integer("stock_at_creation").notNull(),
+    currentStock: integer("current_stock").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .$defaultFn(() => new Date())
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .$defaultFn(() => new Date())
+      .notNull(),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("idx_alerts_tenant_status_level").on(
+      table.tenantId,
+      table.status,
+      table.level
+    ),
+    index("idx_alerts_tenant_updated").on(table.tenantId, table.updatedAt),
+    index("idx_alerts_product_id").on(table.productId),
+  ]
+);
+
 export const stockMovements = pgTable(
   "stock_movements",
   {
@@ -385,6 +425,17 @@ export const stockMovementsRelations = relations(stockMovements, ({ one }) => ({
   }),
 }));
 
+export const alertsRelations = relations(alerts, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [alerts.tenantId],
+    references: [tenants.id],
+  }),
+  product: one(products, {
+    fields: [alerts.productId],
+    references: [products.id],
+  }),
+}));
+
 // ============================================
 // Type Exports
 // ============================================
@@ -401,3 +452,7 @@ export type AuditEvent = typeof auditEvents.$inferSelect;
 export type NewAuditEvent = typeof auditEvents.$inferInsert;
 export type Product = typeof products.$inferSelect;
 export type NewProduct = typeof products.$inferInsert;
+export type StockMovement = typeof stockMovements.$inferSelect;
+export type NewStockMovement = typeof stockMovements.$inferInsert;
+export type Alert = typeof alerts.$inferSelect;
+export type NewAlert = typeof alerts.$inferInsert;

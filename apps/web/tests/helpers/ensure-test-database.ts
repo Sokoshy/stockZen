@@ -146,6 +146,44 @@ async function ensureProductCustomThresholdColumns(target: ReturnType<typeof pos
   `);
 }
 
+async function ensureAlertsTable(target: ReturnType<typeof postgres>): Promise<void> {
+  const alertsTableExists = await target<{ exists: boolean }[]>`
+    select exists (
+      select 1
+      from information_schema.tables
+      where table_schema = 'public'
+        and table_name = 'alerts'
+    ) as exists
+  `;
+
+  if (alertsTableExists[0]?.exists) {
+    return;
+  }
+
+  await target.unsafe(`
+    CREATE TYPE alert_level AS ENUM ('red', 'orange', 'green');
+    CREATE TYPE alert_status AS ENUM ('active', 'closed');
+    
+    CREATE TABLE alerts (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id uuid NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      product_id uuid NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      level alert_level NOT NULL,
+      status alert_status NOT NULL DEFAULT 'active',
+      stock_at_creation integer NOT NULL,
+      current_stock integer NOT NULL,
+      created_at timestamp with time zone DEFAULT now() NOT NULL,
+      updated_at timestamp with time zone DEFAULT now() NOT NULL,
+      closed_at timestamp with time zone
+    );
+    
+    CREATE UNIQUE INDEX idx_alerts_one_active_per_product ON alerts (tenant_id, product_id) WHERE status = 'active';
+    CREATE INDEX idx_alerts_tenant_status_level ON alerts (tenant_id, status, level);
+    CREATE INDEX idx_alerts_tenant_updated ON alerts (tenant_id, updated_at DESC);
+    CREATE INDEX idx_alerts_product_id ON alerts (product_id);
+  `);
+}
+
 export async function ensureTestDatabaseReady(): Promise<void> {
   const testDatabaseUrlRaw = getTestDatabaseUrl();
 
@@ -214,6 +252,7 @@ export async function ensureTestDatabaseReady(): Promise<void> {
       await ensureProductStory21Columns(target);
       await ensureTenantThresholdColumns(target);
       await ensureProductCustomThresholdColumns(target);
+      await ensureAlertsTable(target);
       return;
     }
 
@@ -230,6 +269,7 @@ export async function ensureTestDatabaseReady(): Promise<void> {
     await ensureProductStory21Columns(target);
     await ensureTenantThresholdColumns(target);
     await ensureProductCustomThresholdColumns(target);
+    await ensureAlertsTable(target);
   } catch {
   } finally {
     await target.end({ timeout: 5 });
