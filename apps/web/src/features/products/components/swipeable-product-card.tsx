@@ -128,6 +128,19 @@ export function SwipeableProductCard({
     return "bg-green-100 text-green-700";
   };
 
+  const getAlertBadgeStyles = (level: ProductRow["alertLevel"]): string => {
+    if (level === "red") {
+      return "bg-red-500 text-white";
+    }
+    if (level === "orange") {
+      return "bg-orange-500 text-white";
+    }
+    if (level === "green") {
+      return "bg-green-500 text-white";
+    }
+    return "";
+  };
+
   return (
     <div
       ref={cardRef}
@@ -285,6 +298,14 @@ export function SwipeableProductCard({
                   />
                 </svg>
                 {product.quantity} {product.unit}
+                {product.alertLevel && (
+                  <span
+                    className={`ml-2 inline-flex items-center rounded px-1.5 py-0.5 text-xs font-bold ${getAlertBadgeStyles(product.alertLevel)}`}
+                    title={`Alert level: ${product.alertLevel}`}
+                  >
+                    {product.alertLevel.toUpperCase()}
+                  </span>
+                )}
               </span>
               <span className="inline-flex items-center font-medium text-gray-900">
                 <svg

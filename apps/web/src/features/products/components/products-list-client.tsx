@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { TenantRole } from "~/schemas/team-membership";
-import type { ProductOutput } from "~/schemas/products";
+import type { ProductWithAlertOutput } from "~/schemas/products";
 import type { LocalProduct } from "~/features/offline/database";
 import { getLocalProducts } from "~/features/offline/product-operations";
 import { ProductsTable } from "../components/products-table";
@@ -14,12 +14,12 @@ import type { ProductRow } from "../utils/filter-utils";
 import { api } from "~/trpc/react";
 
 interface ProductsListClientProps {
-  serverProducts: ProductOutput[];
+  serverProducts: ProductWithAlertOutput[];
   actorRole: TenantRole;
   tenantId: string;
 }
 
-function toServerProductRow(product: ProductOutput): ProductRow {
+function toServerProductRow(product: ProductWithAlertOutput): ProductRow {
   return {
     id: product.id,
     tenantId: product.tenantId,
@@ -33,9 +33,14 @@ function toServerProductRow(product: ProductOutput): ProductRow {
     purchasePrice: "purchasePrice" in product ? product.purchasePrice : undefined,
     quantity: product.quantity,
     lowStockThreshold: product.lowStockThreshold,
+    customCriticalThreshold: product.customCriticalThreshold,
+    customAttentionThreshold: product.customAttentionThreshold,
     createdAt: product.createdAt,
     updatedAt: product.updatedAt,
     syncStatus: "synced",
+    alertLevel: product.alertLevel,
+    hasActiveAlert: product.hasActiveAlert,
+    activeAlertUpdatedAt: product.activeAlertUpdatedAt,
   };
 }
 
@@ -56,6 +61,9 @@ function toLocalProductRow(product: LocalProduct, canViewPurchasePrice: boolean)
     createdAt: product.createdAt,
     updatedAt: product.updatedAt,
     syncStatus: product.syncStatus,
+    alertLevel: null,
+    hasActiveAlert: false,
+    activeAlertUpdatedAt: null,
   };
 }
 

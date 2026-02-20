@@ -14,6 +14,32 @@ type ProductsTableProps = {
   onProductRestored: (productId: string) => void;
 };
 
+function getAlertBadgeStyles(level: ProductRow["alertLevel"]): string {
+  if (level === "red") {
+    return "bg-red-100 text-red-800 border-red-200";
+  }
+  if (level === "orange") {
+    return "bg-orange-100 text-orange-800 border-orange-200";
+  }
+  if (level === "green") {
+    return "bg-green-100 text-green-800 border-green-200";
+  }
+  return "bg-gray-100 text-gray-600 border-gray-200";
+}
+
+function AlertBadge({ level }: { level: ProductRow["alertLevel"] }) {
+  if (!level) return null;
+  
+  return (
+    <span
+      className={`ml-2 inline-flex items-center rounded-md border px-1.5 py-0.5 text-xs font-medium ${getAlertBadgeStyles(level)}`}
+      title={`Alert level: ${level}`}
+    >
+      {level.toUpperCase()}
+    </span>
+  );
+}
+
 export function ProductsTable({
   products,
   actorRole,
@@ -105,7 +131,12 @@ export function ProductsTable({
                       {"purchasePrice" in product ? (product.purchasePrice ?? "-") : "-"}
                     </td>
                   ) : null}
-                  <td className="px-3 py-3 text-sm text-gray-700">{product.quantity}</td>
+                  <td className="px-3 py-3 text-sm text-gray-700">
+                    <span className="flex items-center">
+                      {product.quantity}
+                      <AlertBadge level={product.alertLevel} />
+                    </span>
+                  </td>
                   <td className="px-3 py-3 text-sm text-gray-700">
                     {new Date(product.updatedAt).toLocaleString()}
                   </td>
