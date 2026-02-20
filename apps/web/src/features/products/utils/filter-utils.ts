@@ -22,6 +22,9 @@ export interface ProductRow {
   createdAt: string;
   updatedAt: string;
   syncStatus: "pending" | "synced" | "failed";
+  alertLevel: "red" | "orange" | "green" | null;
+  hasActiveAlert: boolean;
+  activeAlertUpdatedAt: string | null;
 }
 
 export interface TenantThresholds {

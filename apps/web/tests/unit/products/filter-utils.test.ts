@@ -30,6 +30,9 @@ const mockProduct = (overrides: Partial<ProductRow> = {}): ProductRow => ({
   createdAt: "2026-02-15T10:00:00.000Z",
   updatedAt: "2026-02-15T10:00:00.000Z",
   syncStatus: "synced",
+  alertLevel: null,
+  hasActiveAlert: false,
+  activeAlertUpdatedAt: null,
   ...overrides,
 });
 

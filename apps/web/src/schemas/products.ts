@@ -198,8 +198,43 @@ export type AdminManagerProductOutput = z.infer<typeof adminManagerProductOutput
 
 export type ProductOutput = OperatorProductOutput | AdminManagerProductOutput;
 
+export const alertMetadataSchema = z.object({
+  alertLevel: z.enum(["red", "orange", "green"]).nullable(),
+  hasActiveAlert: z.boolean(),
+  activeAlertUpdatedAt: z.string().datetime().nullable(),
+});
+
+export type AlertMetadata = z.infer<typeof alertMetadataSchema>;
+
+export const productWithAlertMetadataSchema = productSchema.extend({
+  alertLevel: z.enum(["red", "orange", "green"]).nullable(),
+  hasActiveAlert: z.boolean(),
+  activeAlertUpdatedAt: z.string().datetime().nullable(),
+});
+
+export const operatorProductWithAlertMetadataSchema = operatorProductOutputSchema.extend({
+  alertLevel: z.enum(["red", "orange", "green"]).nullable(),
+  hasActiveAlert: z.boolean(),
+  activeAlertUpdatedAt: z.string().datetime().nullable(),
+});
+
+export const adminManagerProductWithAlertMetadataSchema = adminManagerProductOutputSchema.extend({
+  alertLevel: z.enum(["red", "orange", "green"]).nullable(),
+  hasActiveAlert: z.boolean(),
+  activeAlertUpdatedAt: z.string().datetime().nullable(),
+});
+
+export const productWithAlertOutputSchema = z.union([
+  adminManagerProductWithAlertMetadataSchema,
+  operatorProductWithAlertMetadataSchema,
+]);
+
+export type ProductWithAlertOutput = z.infer<typeof productWithAlertOutputSchema>;
+export type OperatorProductWithAlertOutput = z.infer<typeof operatorProductWithAlertMetadataSchema>;
+export type AdminManagerProductWithAlertOutput = z.infer<typeof adminManagerProductWithAlertMetadataSchema>;
+
 export const listProductsOutputSchema = z.object({
-  products: z.array(productOutputSchema),
+  products: z.array(productWithAlertOutputSchema),
   actorRole: tenantRoleSchema,
 });
 

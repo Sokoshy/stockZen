@@ -21,9 +21,14 @@ function makeProduct(overrides: Partial<ProductRow>): ProductRow {
     purchasePrice: overrides.purchasePrice,
     quantity: overrides.quantity ?? 0,
     lowStockThreshold: overrides.lowStockThreshold ?? null,
+    customCriticalThreshold: overrides.customCriticalThreshold ?? null,
+    customAttentionThreshold: overrides.customAttentionThreshold ?? null,
     createdAt: overrides.createdAt ?? "2026-02-16T00:00:00.000Z",
     updatedAt: overrides.updatedAt ?? "2026-02-16T00:00:00.000Z",
     syncStatus: overrides.syncStatus ?? "synced",
+    alertLevel: overrides.alertLevel ?? null,
+    hasActiveAlert: overrides.hasActiveAlert ?? false,
+    activeAlertUpdatedAt: overrides.activeAlertUpdatedAt ?? null,
   };
 }
 
