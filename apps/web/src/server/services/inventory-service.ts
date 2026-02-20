@@ -1,6 +1,7 @@
 import { products, stockMovements } from "~/server/db/schema";
 import { eq, and, desc, lt, or, sql } from "drizzle-orm";
 import { logger } from "~/server/logger";
+import { updateAlertLifecycle } from "~/server/services/alert-service";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "~/server/db/schema";
 
@@ -104,13 +105,29 @@ export const inventoryService = {
       }
 
       const stockChange = type === "entry" ? quantity : -quantity;
-      await tx
+      const [updatedProduct] = await tx
         .update(products)
         .set({
-          quantity: product.quantity + stockChange,
+          quantity: sql`${products.quantity} + ${stockChange}`,
           updatedAt: new Date(),
         })
-        .where(and(eq(products.id, productId), eq(products.tenantId, tenantId)));
+        .where(and(eq(products.id, productId), eq(products.tenantId, tenantId)))
+        .returning({
+          quantity: products.quantity,
+        });
+
+      if (!updatedProduct) {
+        throw new Error("Product not found");
+      }
+
+      const newQuantity = updatedProduct.quantity;
+
+      await updateAlertLifecycle({
+        db: tx,
+        tenantId,
+        productId,
+        currentStock: newQuantity,
+      });
 
       logger.info(
         { movementId: movement.id, productId, type, quantity },

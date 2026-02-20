@@ -3,7 +3,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { products, stockMovements } from "~/server/db/schema";
+import { alerts, products, stockMovements } from "~/server/db/schema";
 import {
   addUserToTenantWithRole,
   cleanTestDatabase,
@@ -165,6 +165,132 @@ describe("Stock movements API", () => {
     });
 
     expect(movementsWithKey).toHaveLength(1);
+  });
+
+  it("maintains one active alert through create, update-in-place, and close transitions", async () => {
+    const admin = await createTestTenant();
+    const adminCtx = await createTenantContext(admin);
+
+    const product = await adminCtx.caller.products.create({
+      name: "Lifecycle Product",
+      category: "Raw Materials",
+      unit: "kg",
+      price: 12,
+      quantity: 150,
+    });
+
+    await adminCtx.caller.stockMovements.create({
+      productId: product.id,
+      type: "exit",
+      quantity: 60,
+    });
+
+    const activeAfterCreate = await testDb.query.alerts.findMany({
+      where: and(
+        eq(alerts.tenantId, admin.tenantId),
+        eq(alerts.productId, product.id),
+        eq(alerts.status, "active")
+      ),
+    });
+
+    expect(activeAfterCreate).toHaveLength(1);
+    const firstActive = activeAfterCreate[0];
+    expect(firstActive?.level).toBe("orange");
+    expect(firstActive?.stockAtCreation).toBe(90);
+
+    await adminCtx.caller.stockMovements.create({
+      productId: product.id,
+      type: "exit",
+      quantity: 60,
+    });
+
+    const activeAfterUpdate = await testDb.query.alerts.findMany({
+      where: and(
+        eq(alerts.tenantId, admin.tenantId),
+        eq(alerts.productId, product.id),
+        eq(alerts.status, "active")
+      ),
+    });
+
+    expect(activeAfterUpdate).toHaveLength(1);
+    expect(activeAfterUpdate[0]?.id).toBe(firstActive?.id);
+    expect(activeAfterUpdate[0]?.level).toBe("red");
+    expect(activeAfterUpdate[0]?.currentStock).toBe(30);
+
+    await adminCtx.caller.stockMovements.create({
+      productId: product.id,
+      type: "entry",
+      quantity: 80,
+    });
+
+    const activeAfterClose = await testDb.query.alerts.findMany({
+      where: and(
+        eq(alerts.tenantId, admin.tenantId),
+        eq(alerts.productId, product.id),
+        eq(alerts.status, "active")
+      ),
+    });
+    expect(activeAfterClose).toHaveLength(0);
+
+    const closedAlerts = await testDb.query.alerts.findMany({
+      where: and(
+        eq(alerts.tenantId, admin.tenantId),
+        eq(alerts.productId, product.id),
+        eq(alerts.status, "closed")
+      ),
+    });
+
+    expect(closedAlerts).toHaveLength(1);
+    expect(closedAlerts[0]?.id).toBe(firstActive?.id);
+    expect(closedAlerts[0]?.closedAt).toBeTruthy();
+    expect(closedAlerts[0]?.currentStock).toBe(110);
+  });
+
+  it("does not create duplicate active alerts on idempotent replay", async () => {
+    const admin = await createTestTenant();
+    const adminCtx = await createTenantContext(admin);
+
+    const product = await adminCtx.caller.products.create({
+      name: "Replay Product",
+      category: "Raw Materials",
+      unit: "kg",
+      price: 9,
+      quantity: 100,
+    });
+
+    const idempotencyKey = crypto.randomUUID();
+
+    const first = await adminCtx.caller.stockMovements.create({
+      productId: product.id,
+      type: "exit",
+      quantity: 70,
+      idempotencyKey,
+    });
+
+    const second = await adminCtx.caller.stockMovements.create({
+      productId: product.id,
+      type: "exit",
+      quantity: 70,
+      idempotencyKey,
+    });
+
+    expect(second.id).toBe(first.id);
+
+    const productAfter = await testDb.query.products.findFirst({
+      where: and(eq(products.id, product.id), eq(products.tenantId, admin.tenantId)),
+    });
+    expect(productAfter?.quantity).toBe(30);
+
+    const activeAlerts = await testDb.query.alerts.findMany({
+      where: and(
+        eq(alerts.tenantId, admin.tenantId),
+        eq(alerts.productId, product.id),
+        eq(alerts.status, "active")
+      ),
+    });
+
+    expect(activeAlerts).toHaveLength(1);
+    expect(activeAlerts[0]?.level).toBe("red");
   });
 
   describe("listByProduct pagination", () => {
