@@ -4,6 +4,7 @@ import Link from "next/link";
 import { LogoutButton } from "~/features/auth/components/logout-button";
 import { getSession } from "~/server/better-auth/server";
 import { TenantThresholdsForm } from "~/features/tenant-thresholds/components/tenant-thresholds-form";
+import { ActiveAlertsList } from "~/features/alerts/components/active-alerts-list";
 import { db } from "~/server/db";
 import { tenantMemberships } from "~/server/db/schema";
 import { eq, and } from "drizzle-orm";
@@ -47,6 +48,12 @@ export default async function DashboardPage() {
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <div className="lg:col-span-2">
+            <ActiveAlertsList />
+          </div>
+        </div>
+
+        <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
           <div className="lg:col-span-2">
             <div className="rounded-lg bg-white p-6 shadow">
               <h2 className="text-lg font-semibold text-gray-900">Welcome to StockZen!</h2>
