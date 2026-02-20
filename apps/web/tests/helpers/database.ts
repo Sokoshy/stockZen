@@ -38,6 +38,14 @@ export async function cleanDatabase(db: ReturnType<typeof createTestDb>) {
       IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'audit_status') THEN
         CREATE TYPE audit_status AS ENUM ('success', 'failure');
       END IF;
+
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'alert_level') THEN
+        CREATE TYPE alert_level AS ENUM ('red', 'orange', 'green');
+      END IF;
+
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'alert_status') THEN
+        CREATE TYPE alert_status AS ENUM ('active', 'closed');
+      END IF;
     END
     $$;
   `);
@@ -56,7 +64,34 @@ export async function cleanDatabase(db: ReturnType<typeof createTestDb>) {
     );
   `);
 
+  await client.unsafe(`
+    CREATE TABLE IF NOT EXISTS "alerts" (
+      "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      "tenant_id" uuid NOT NULL REFERENCES "tenants"("id") ON DELETE CASCADE,
+      "product_id" uuid NOT NULL REFERENCES "products"("id") ON DELETE CASCADE,
+      "level" alert_level NOT NULL,
+      "status" alert_status NOT NULL DEFAULT 'active',
+      "stock_at_creation" integer NOT NULL,
+      "current_stock" integer NOT NULL,
+      "handled_at" timestamp with time zone,
+      "snoozed_until" timestamp with time zone,
+      "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+      "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+      "closed_at" timestamp with time zone
+    );
+  `);
+
+  await client.unsafe(`
+    CREATE UNIQUE INDEX IF NOT EXISTS "idx_alerts_one_active_per_product" ON "alerts" ("tenant_id", "product_id") WHERE "status" = 'active';
+  `);
+
+  await client.unsafe(`
+    ALTER TABLE "alerts" ADD COLUMN IF NOT EXISTS "handled_at" timestamp with time zone;
+    ALTER TABLE "alerts" ADD COLUMN IF NOT EXISTS "snoozed_until" timestamp with time zone;
+  `);
+
   const tablesInDeleteOrder = [
+    "alerts",
     "audit_events",
     "products",
     "tenant_invitations",
