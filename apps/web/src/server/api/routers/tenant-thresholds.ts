@@ -120,6 +120,7 @@ export const tenantThresholdsRouter = createTRPCRouter({
         .where(
           and(
             eq(products.tenantId, tenantId),
+            isNull(products.deletedAt),
             isNull(products.customCriticalThreshold),
             isNull(products.customAttentionThreshold)
           )

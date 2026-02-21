@@ -1,7 +1,11 @@
 import { products, stockMovements } from "~/server/db/schema";
 import { eq, and, desc, lt, or, sql } from "drizzle-orm";
 import { logger } from "~/server/logger";
-import { updateAlertLifecycle } from "~/server/services/alert-service";
+import {
+  flushPendingCriticalAlertNotifications,
+  updateAlertLifecycle,
+  type CriticalAlertNotificationTask,
+} from "~/server/services/alert-service";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "~/server/db/schema";
 
@@ -56,7 +60,9 @@ export const inventoryService = {
   async createMovement(input: CreateMovementInput): Promise<MovementOutput> {
     const { db: dbClient, tenantId, userId, productId, type, quantity, idempotencyKey } = input;
 
-    return dbClient.transaction(async (tx) => {
+    const pendingCriticalNotifications: CriticalAlertNotificationTask[] = [];
+
+    const movement = await dbClient.transaction(async (tx) => {
       const product = await tx.query.products.findFirst({
         where: and(eq(products.id, productId), eq(products.tenantId, tenantId)),
       });
@@ -127,6 +133,7 @@ export const inventoryService = {
         tenantId,
         productId,
         currentStock: newQuantity,
+        pendingCriticalNotifications,
       });
 
       logger.info(
@@ -142,6 +149,12 @@ export const inventoryService = {
         createdAt: movement.createdAt,
       };
     });
+
+    if (pendingCriticalNotifications.length > 0) {
+      await flushPendingCriticalAlertNotifications(dbClient, pendingCriticalNotifications);
+    }
+
+    return movement;
   },
 
   async getMovementsByProduct({

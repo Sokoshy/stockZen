@@ -1,7 +1,11 @@
 import { and, eq, sql } from "drizzle-orm";
 import { products, stockMovements, tenants } from "~/server/db/schema";
 import { logger } from "~/server/logger";
-import { updateAlertLifecycle } from "~/server/services/alert-service";
+import {
+  flushPendingCriticalAlertNotifications,
+  updateAlertLifecycle,
+  type CriticalAlertNotificationTask,
+} from "~/server/services/alert-service";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "~/server/db/schema";
 import type {
@@ -409,6 +413,7 @@ async function processStockMovementCreate(
 
   const type = payload.type as "entry" | "exit";
   const quantity = payload.quantity as number;
+  const pendingCriticalNotifications: CriticalAlertNotificationTask[] = [];
 
   const result = await db.transaction(async (tx) => {
     const [newMovement] = await tx
@@ -450,6 +455,7 @@ async function processStockMovementCreate(
       tenantId,
       productId,
       currentStock: newQuantity,
+      pendingCriticalNotifications,
     });
 
     return { movement: newMovement, newQuantity };
@@ -457,6 +463,10 @@ async function processStockMovementCreate(
 
   if (!result) {
     return { status: "validation_error", message: "Failed to create movement" };
+  }
+
+  if (pendingCriticalNotifications.length > 0) {
+    await flushPendingCriticalAlertNotifications(db, pendingCriticalNotifications);
   }
 
   logger.info(
