@@ -65,7 +65,7 @@ development_status:
   3-2-configure-per-product-thresholds-optional-override-of-defaults: done
   3-3-automatic-alert-generation-r-o-g-classification-one-active-alert-per-product: done
   3-4-alert-triage-handled-vs-snoozed-ignored: done
-  3-5-email-notifications-for-critical-red-alerts-all-tenant-members: backlog
+  3-5-email-notifications-for-critical-red-alerts-all-tenant-members: review
   epic-3-retrospective: optional
 
   epic-4: backlog
