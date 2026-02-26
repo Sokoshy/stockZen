@@ -43,7 +43,10 @@ export const snoozeAlertInputSchema = z.object({
 
 export type SnoozeAlertInput = z.infer<typeof snoozeAlertInputSchema>;
 
-export const listActiveAlertsInputSchema = z.object({});
+export const listActiveAlertsInputSchema = z.object({
+  cursor: z.string().uuid().nullish(),
+  limit: z.number().min(1).max(100).default(20),
+});
 
 export type ListActiveAlertsInput = z.infer<typeof listActiveAlertsInputSchema>;
 
@@ -62,6 +65,7 @@ export type ActiveAlert = z.infer<typeof activeAlertSchema>;
 
 export const listActiveAlertsOutputSchema = z.object({
   alerts: z.array(activeAlertSchema),
+  nextCursor: z.string().uuid().nullable(),
 });
 
 export type ListActiveAlertsOutput = z.infer<typeof listActiveAlertsOutputSchema>;

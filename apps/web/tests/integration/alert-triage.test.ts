@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { alerts, products } from "~/server/db/schema";
@@ -259,9 +259,10 @@ describe("Alert Triage Integration Tests", () => {
       const visibleAlerts = await listActiveAlerts({
         db: testDb,
         tenantId: admin.tenantId,
+        limit: 20,
       });
 
-      expect(visibleAlerts).toHaveLength(0);
+      expect(visibleAlerts.alerts).toHaveLength(0);
     });
 
     it("throws NOT_FOUND for non-existent alert", async () => {
@@ -390,8 +391,9 @@ describe("Alert Triage Integration Tests", () => {
       const visibleBeforeSnooze = await listActiveAlerts({
         db: testDb,
         tenantId: admin.tenantId,
+        limit: 20,
       });
-      expect(visibleBeforeSnooze).toHaveLength(0);
+      expect(visibleBeforeSnooze.alerts).toHaveLength(0);
 
       await updateAlertLifecycle({
         db: testDb,
@@ -403,9 +405,10 @@ describe("Alert Triage Integration Tests", () => {
       const visibleAfterWorsen = await listActiveAlerts({
         db: testDb,
         tenantId: admin.tenantId,
+        limit: 20,
       });
-      expect(visibleAfterWorsen).toHaveLength(1);
-      expect(visibleAfterWorsen[0]?.level).toBe("red");
+      expect(visibleAfterWorsen.alerts).toHaveLength(1);
+      expect(visibleAfterWorsen.alerts[0]?.level).toBe("red");
     });
   });
 
@@ -652,6 +655,178 @@ describe("Alert Triage Integration Tests", () => {
       expect(result.alerts).toHaveLength(2);
       expect(result.alerts[0]?.level).toBe("red");
       expect(result.alerts[1]?.level).toBe("orange");
+    });
+
+    it("sorts same-level alerts by urgency (lower stock first)", async () => {
+      const admin = await createTestTenant();
+      const ctx = await createTenantContext(admin);
+
+      const orangeLessUrgent = await ctx.caller.products.create({
+        name: "Orange Less Urgent",
+        category: "Test",
+        price: 100,
+        quantity: 90,
+      });
+
+      const orangeMoreUrgent = await ctx.caller.products.create({
+        name: "Orange More Urgent",
+        category: "Test",
+        price: 100,
+        quantity: 70,
+      });
+
+      await updateAlertLifecycle({
+        db: testDb,
+        tenantId: admin.tenantId,
+        productId: orangeLessUrgent.id,
+        currentStock: 90,
+      });
+
+      await updateAlertLifecycle({
+        db: testDb,
+        tenantId: admin.tenantId,
+        productId: orangeMoreUrgent.id,
+        currentStock: 70,
+      });
+
+      const result = await ctx.caller.alerts.listActive({});
+
+      expect(result.alerts).toHaveLength(2);
+      expect(result.alerts[0]?.currentStock).toBe(70);
+      expect(result.alerts[1]?.currentStock).toBe(90);
+    });
+
+    it("paginates without duplicates across priority boundaries", async () => {
+      const admin = await createTestTenant();
+      const ctx = await createTenantContext(admin);
+
+      const redMostUrgent = await ctx.caller.products.create({
+        name: "Red Most Urgent",
+        category: "Test",
+        price: 100,
+        quantity: 10,
+      });
+
+      const redLessUrgent = await ctx.caller.products.create({
+        name: "Red Less Urgent",
+        category: "Test",
+        price: 100,
+        quantity: 30,
+      });
+
+      const orangeMostUrgent = await ctx.caller.products.create({
+        name: "Orange Most Urgent",
+        category: "Test",
+        price: 100,
+        quantity: 70,
+      });
+
+      const orangeLessUrgent = await ctx.caller.products.create({
+        name: "Orange Less Urgent",
+        category: "Test",
+        price: 100,
+        quantity: 90,
+      });
+
+      await updateAlertLifecycle({
+        db: testDb,
+        tenantId: admin.tenantId,
+        productId: redMostUrgent.id,
+        currentStock: 10,
+      });
+      await updateAlertLifecycle({
+        db: testDb,
+        tenantId: admin.tenantId,
+        productId: redLessUrgent.id,
+        currentStock: 30,
+      });
+      await updateAlertLifecycle({
+        db: testDb,
+        tenantId: admin.tenantId,
+        productId: orangeMostUrgent.id,
+        currentStock: 70,
+      });
+      await updateAlertLifecycle({
+        db: testDb,
+        tenantId: admin.tenantId,
+        productId: orangeLessUrgent.id,
+        currentStock: 90,
+      });
+
+      const allAlerts: Awaited<
+        ReturnType<typeof ctx.caller.alerts.listActive>
+      >["alerts"] = [];
+      let cursor: string | undefined;
+
+      for (let pageIndex = 0; pageIndex < 5; pageIndex += 1) {
+        const page = await ctx.caller.alerts.listActive({
+          cursor,
+          limit: 2,
+        });
+
+        allAlerts.push(...page.alerts);
+
+        if (!page.nextCursor) {
+          break;
+        }
+
+        cursor = page.nextCursor;
+      }
+
+      const ids = allAlerts.map((alert) => alert.id);
+
+      expect(allAlerts).toHaveLength(4);
+      expect(new Set(ids).size).toBe(ids.length);
+      expect(allAlerts.map((alert) => alert.level)).toEqual([
+        "red",
+        "red",
+        "orange",
+        "orange",
+      ]);
+      expect(allAlerts.map((alert) => alert.currentStock)).toEqual([10, 30, 70, 90]);
+    });
+
+    it("dashboard stats exclude currently snoozed alerts", async () => {
+      const admin = await createTestTenant();
+      const ctx = await createTenantContext(admin);
+
+      const product1 = await ctx.caller.products.create({
+        name: "Product 1",
+        category: "Test",
+        price: 100,
+        quantity: 30,
+      });
+
+      const product2 = await ctx.caller.products.create({
+        name: "Product 2",
+        category: "Test",
+        price: 100,
+        quantity: 20,
+      });
+
+      await updateAlertLifecycle({
+        db: testDb,
+        tenantId: admin.tenantId,
+        productId: product1.id,
+        currentStock: 30,
+      });
+
+      await updateAlertLifecycle({
+        db: testDb,
+        tenantId: admin.tenantId,
+        productId: product2.id,
+        currentStock: 20,
+      });
+
+      const activeAlerts = await ctx.caller.alerts.listActive({});
+      expect(activeAlerts.alerts).toHaveLength(2);
+
+      await ctx.caller.alerts.snooze({ alertId: activeAlerts.alerts[0]!.id });
+
+      const stats = await ctx.caller.dashboard.stats();
+      expect(stats.totalProducts).toBe(2);
+      expect(stats.activeAlertsCount).toBe(1);
+      expect(stats.pmi).toBeNull();
     });
   });
 });

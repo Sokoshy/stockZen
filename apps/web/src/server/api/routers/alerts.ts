@@ -13,13 +13,15 @@ export const alertsRouter = createTRPCRouter({
   listActive: protectedProcedure
     .input(listActiveAlertsInputSchema)
     .output(listActiveAlertsOutputSchema)
-    .query(async ({ ctx }) => {
+    .query(async ({ ctx, input }) => {
       const userId = ctx.session.user.id;
       const tenantId = ctx.tenantId!;
 
-      const alerts = await listActiveAlerts({
+      const { alerts, nextCursor } = await listActiveAlerts({
         db: ctx.db,
         tenantId,
+        cursor: input.cursor,
+        limit: input.limit ?? 20,
       });
 
       logger.debug({ userId, tenantId, alertCount: alerts.length }, "Active alerts listed");
@@ -35,6 +37,7 @@ export const alertsRouter = createTRPCRouter({
           createdAt: alert.createdAt.toISOString(),
           updatedAt: alert.updatedAt.toISOString(),
         })),
+        nextCursor,
       };
     }),
 

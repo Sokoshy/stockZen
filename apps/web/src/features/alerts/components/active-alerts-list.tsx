@@ -21,11 +21,18 @@ export function ActiveAlertsList({ onAlertHandled }: ActiveAlertsListProps) {
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
   const utils = api.useUtils();
 
+  const invalidateDashboardData = () => {
+    void Promise.all([
+      utils.alerts.listActive.invalidate(),
+      utils.dashboard.stats.invalidate(),
+    ]);
+  };
+
   const { data: alertsData, isLoading, error } = api.alerts.listActive.useQuery({});
 
   const markHandledMutation = api.alerts.markHandled.useMutation({
     onSuccess: () => {
-      void utils.alerts.listActive.invalidate();
+      invalidateDashboardData();
       onAlertHandled?.();
     },
     onSettled: () => {
@@ -35,7 +42,7 @@ export function ActiveAlertsList({ onAlertHandled }: ActiveAlertsListProps) {
 
   const snoozeMutation = api.alerts.snooze.useMutation({
     onSuccess: () => {
-      void utils.alerts.listActive.invalidate();
+      invalidateDashboardData();
       onAlertHandled?.();
     },
     onSettled: () => {

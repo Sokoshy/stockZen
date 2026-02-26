@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { alerts, products, tenantMemberships, tenants, user } from "~/server/db/schema";
 import { logger } from "~/server/logger";
 import {
@@ -608,6 +608,13 @@ export interface ListActiveAlertsInput {
   tenantId: string;
 }
 
+export interface ListActiveAlertsParams {
+  db: AlertDbClient;
+  tenantId: string;
+  cursor?: string | null;
+  limit: number;
+}
+
 export interface ActiveAlertOutput {
   id: string;
   productId: string;
@@ -620,9 +627,79 @@ export interface ActiveAlertOutput {
 }
 
 export async function listActiveAlerts(
-  input: ListActiveAlertsInput
-): Promise<ActiveAlertOutput[]> {
-  const { db, tenantId } = input;
+  input: ListActiveAlertsParams
+): Promise<{ alerts: ActiveAlertOutput[]; nextCursor: string | null }> {
+  const { db, tenantId, cursor, limit = 20 } = input;
+  const itemsToFetch = limit + 1;
+
+  const levelRankExpr = sql<number>`case
+    when ${alerts.level} = 'red' then 0
+    when ${alerts.level} = 'orange' then 1
+    else 2
+  end`;
+
+  const getLevelRank = (level: AlertLevel): number => {
+    if (level === "red") {
+      return 0;
+    }
+    if (level === "orange") {
+      return 1;
+    }
+    return 2;
+  };
+
+  let cursorCondition;
+  if (cursor) {
+    const cursorAlert = await db
+      .select({
+        level: alerts.level,
+        currentStock: alerts.currentStock,
+        updatedAt: alerts.updatedAt,
+      })
+      .from(alerts)
+      .where(
+        and(
+          eq(alerts.id, cursor),
+          eq(alerts.tenantId, tenantId),
+          eq(alerts.status, "active"),
+          or(isNull(alerts.snoozedUntil), sql`${alerts.snoozedUntil} <= now()`)
+        )
+      )
+      .limit(1);
+
+    if (cursorAlert.length > 0) {
+      const cursorLevel = cursorAlert[0]!.level;
+      const cursorCurrentStock = cursorAlert[0]!.currentStock;
+      const cursorUpdatedAt = cursorAlert[0]!.updatedAt;
+      const cursorRank = getLevelRank(cursorLevel);
+
+      cursorCondition = or(
+        gt(levelRankExpr, cursorRank),
+        and(eq(levelRankExpr, cursorRank), gt(alerts.currentStock, cursorCurrentStock)),
+        and(
+          eq(levelRankExpr, cursorRank),
+          eq(alerts.currentStock, cursorCurrentStock),
+          lt(alerts.updatedAt, cursorUpdatedAt)
+        ),
+        and(
+          eq(levelRankExpr, cursorRank),
+          eq(alerts.currentStock, cursorCurrentStock),
+          eq(alerts.updatedAt, cursorUpdatedAt),
+          lt(alerts.id, cursor)
+        )
+      );
+    }
+  }
+
+  const whereClause = and(
+    eq(alerts.tenantId, tenantId),
+    eq(alerts.status, "active"),
+    or(
+      isNull(alerts.snoozedUntil),
+      sql`${alerts.snoozedUntil} <= now()`
+    ),
+    cursorCondition
+  );
 
   const activeAlerts = await db
     .select({
@@ -637,26 +714,22 @@ export async function listActiveAlerts(
     })
     .from(alerts)
     .innerJoin(products, eq(alerts.productId, products.id))
-    .where(
-      and(
-        eq(alerts.tenantId, tenantId),
-        eq(alerts.status, "active"),
-        or(
-          isNull(alerts.snoozedUntil),
-          sql`${alerts.snoozedUntil} <= now()`
-        )
-      )
-    )
+    .where(whereClause ?? undefined)
     .orderBy(
-      sql`case
-        when ${alerts.level} = 'red' then 0
-        when ${alerts.level} = 'orange' then 1
-        else 2
-      end`,
-      desc(alerts.updatedAt)
-    );
+      levelRankExpr,
+      asc(alerts.currentStock),
+      desc(alerts.updatedAt),
+      desc(alerts.id)
+    )
+    .limit(itemsToFetch);
 
-  return activeAlerts;
+  let nextCursor: string | null = null;
+  if (activeAlerts.length > limit) {
+    activeAlerts.pop();
+    nextCursor = activeAlerts[activeAlerts.length - 1]?.id ?? null;
+  }
+
+  return { alerts: activeAlerts, nextCursor };
 }
 
 export const alertService = {

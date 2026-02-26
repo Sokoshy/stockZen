@@ -1,5 +1,6 @@
 import { alertsRouter } from "~/server/api/routers/alerts";
 import { authRouter } from "~/server/api/routers/auth";
+import { dashboardRouter } from "~/server/api/routers/dashboard";
 import { postRouter } from "~/server/api/routers/post";
 import { productsRouter } from "~/server/api/routers/products";
 import { stockMovementsRouter } from "~/server/api/routers/stock-movements";
@@ -14,6 +15,7 @@ import { createCallerFactory, createTRPCRouter } from "~/server/api/trpc";
 export const appRouter = createTRPCRouter({
   alerts: alertsRouter,
   auth: authRouter,
+  dashboard: dashboardRouter,
   post: postRouter,
   products: productsRouter,
   stockMovements: stockMovementsRouter,
