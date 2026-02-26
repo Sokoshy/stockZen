@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { alerts, products, tenantMemberships, tenants, user } from "~/server/db/schema";
 import { logger } from "~/server/logger";
 import {
@@ -138,10 +138,21 @@ export async function resolveTenantMembersForCriticalAlert(
     .innerJoin(user, eq(tenantMemberships.userId, user.id))
     .where(eq(tenantMemberships.tenantId, tenantId));
 
-  return memberships.map((m) => ({
-    userId: m.userId,
-    email: m.email,
-  }));
+  const uniqueRecipients = new Map<string, CriticalAlertEmailRecipient>();
+
+  for (const membership of memberships) {
+    const dedupeKey = membership.userId;
+    if (uniqueRecipients.has(dedupeKey)) {
+      continue;
+    }
+
+    uniqueRecipients.set(dedupeKey, {
+      userId: membership.userId,
+      email: membership.email,
+    });
+  }
+
+  return Array.from(uniqueRecipients.values());
 }
 
 export async function dispatchCriticalAlertNotification(
@@ -168,6 +179,19 @@ export async function dispatchCriticalAlertNotification(
     alertLevel: "red",
     productUrl,
   });
+
+  if (!deliveryResult.configured) {
+    logger.warn(
+      {
+        tenantId,
+        productId,
+        recipientCount: recipients.length,
+        skippedCount: recipients.length,
+      },
+      "Critical alert notification delivery skipped: transport not configured"
+    );
+    return;
+  }
 
   logger.info(
     {
@@ -306,54 +330,42 @@ export async function updateAlertLifecycle(
   }
 
   if (existingActiveAlert) {
-    const snoozed = isAlertSnoozed(existingActiveAlert.snoozedUntil, new Date());
+    const now = new Date();
+    const snoozed = isAlertSnoozed(existingActiveAlert.snoozedUntil, now);
 
     if (snoozed && shouldCancelSnoozeOnWorsening(existingActiveAlert.level, newLevel)) {
-      await db
+      const [transitionedToRed] = await db
         .update(alerts)
         .set({
           level: "red",
           currentStock,
           snoozedUntil: null,
-          updatedAt: new Date(),
+          updatedAt: now,
         })
-        .where(eq(alerts.id, existingActiveAlert.id));
+        .where(and(eq(alerts.id, existingActiveAlert.id), ne(alerts.level, "red")))
+        .returning({ id: alerts.id });
+
+      if (!transitionedToRed) {
+        await db
+          .update(alerts)
+          .set({
+            currentStock,
+            updatedAt: now,
+          })
+          .where(eq(alerts.id, existingActiveAlert.id));
+
+        logger.info(
+          { alertId: existingActiveAlert.id, productId, tenantId },
+          "Snoozed alert already transitioned to red by concurrent update"
+        );
+        return;
+      }
 
       logger.info(
         { alertId: existingActiveAlert.id, productId, tenantId, newLevel: "red" },
         "Snooze cancelled - alert worsened from orange to red"
       );
 
-      if (shouldTriggerCriticalNotification(existingActiveAlert.level, newLevel)) {
-        await queueOrDispatchCriticalAlertNotification(
-          db,
-          {
-            tenantId,
-            productId,
-            productName: product.name ?? "Unknown Product",
-            currentStock,
-          },
-          pendingCriticalNotifications
-        );
-      }
-      return;
-    }
-
-    await db
-      .update(alerts)
-      .set({
-        level: newLevel,
-        currentStock,
-        updatedAt: new Date(),
-      })
-      .where(eq(alerts.id, existingActiveAlert.id));
-
-    logger.info(
-      { alertId: existingActiveAlert.id, productId, tenantId, level: newLevel },
-      "Alert updated"
-    );
-
-    if (shouldTriggerCriticalNotification(existingActiveAlert.level, newLevel)) {
       await queueOrDispatchCriticalAlertNotification(
         db,
         {
@@ -364,7 +376,80 @@ export async function updateAlertLifecycle(
         },
         pendingCriticalNotifications
       );
+      return;
     }
+
+    if (newLevel === "red") {
+      const [transitionedToRed] = await db
+        .update(alerts)
+        .set({
+          level: "red",
+          currentStock,
+          updatedAt: now,
+        })
+        .where(and(eq(alerts.id, existingActiveAlert.id), ne(alerts.level, "red")))
+        .returning({ id: alerts.id });
+
+      if (transitionedToRed) {
+        logger.info(
+          {
+            alertId: existingActiveAlert.id,
+            productId,
+            tenantId,
+            level: "red",
+            transitionedToRed: true,
+          },
+          "Alert updated"
+        );
+
+        await queueOrDispatchCriticalAlertNotification(
+          db,
+          {
+            tenantId,
+            productId,
+            productName: product.name ?? "Unknown Product",
+            currentStock,
+          },
+          pendingCriticalNotifications
+        );
+      } else {
+        await db
+          .update(alerts)
+          .set({
+            currentStock,
+            updatedAt: now,
+          })
+          .where(eq(alerts.id, existingActiveAlert.id));
+
+        logger.info(
+          {
+            alertId: existingActiveAlert.id,
+            productId,
+            tenantId,
+            level: "red",
+            transitionedToRed: false,
+          },
+          "Alert updated"
+        );
+      }
+
+      return;
+    }
+
+    await db
+      .update(alerts)
+      .set({
+        level: newLevel,
+        currentStock,
+        updatedAt: now,
+      })
+      .where(eq(alerts.id, existingActiveAlert.id));
+
+    logger.info(
+      { alertId: existingActiveAlert.id, productId, tenantId, level: newLevel },
+      "Alert updated"
+    );
+
     return;
   }
 

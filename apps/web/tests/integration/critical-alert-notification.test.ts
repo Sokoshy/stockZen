@@ -11,6 +11,9 @@ import {
   updateAlertLifecycle,
   resolveTenantMembersForCriticalAlert,
 } from "~/server/services/alert-service";
+import { sendCriticalAlertEmailsToRecipients } from "~/server/services/critical-alert-email";
+import { inventoryService } from "~/server/services/inventory-service";
+import { processSync } from "~/server/services/sync-service";
 import {
   addUserToTenantWithRole,
   cleanTestDatabase,
@@ -19,9 +22,24 @@ import {
   testDb,
 } from "../helpers/tenant-test-factories";
 
+vi.mock("~/server/services/critical-alert-email", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("~/server/services/critical-alert-email")>();
+
+  return {
+    ...actual,
+    sendCriticalAlertEmailsToRecipients: vi.fn(async () => ({
+      configured: true,
+      successCount: 1,
+      failedCount: 0,
+      failedDeliveries: [],
+    })),
+  };
+});
+
 describe("Critical Alert Notification Integration Tests", () => {
   beforeEach(async () => {
     await cleanTestDatabase();
+    vi.mocked(sendCriticalAlertEmailsToRecipients).mockClear();
   });
 
   afterEach(() => {
@@ -73,9 +91,49 @@ describe("Critical Alert Notification Integration Tests", () => {
 
       expect(recipients).toHaveLength(0);
     });
+
   });
 
   describe("notification trigger on non-red to red transitions", () => {
+    it("sends only one email batch on concurrent orange-to-red updates", async () => {
+      const admin = await createTestTenant();
+      const ctx = await createTenantContext(admin);
+
+      const product = await ctx.caller.products.create({
+        name: "Concurrent Product",
+        category: "Test",
+        price: 100,
+        quantity: 75,
+      });
+
+      await updateAlertLifecycle({
+        db: testDb,
+        tenantId: admin.tenantId,
+        productId: product.id,
+        currentStock: 75,
+      });
+
+      const sendEmailsMock = vi.mocked(sendCriticalAlertEmailsToRecipients);
+      sendEmailsMock.mockClear();
+
+      await Promise.all([
+        updateAlertLifecycle({
+          db: testDb,
+          tenantId: admin.tenantId,
+          productId: product.id,
+          currentStock: 40,
+        }),
+        updateAlertLifecycle({
+          db: testDb,
+          tenantId: admin.tenantId,
+          productId: product.id,
+          currentStock: 35,
+        }),
+      ]);
+
+      expect(sendEmailsMock).toHaveBeenCalledTimes(1);
+    });
+
     it("collects one notification with product details when product first becomes red", async () => {
       const admin = await createTestTenant();
       const ctx = await createTenantContext(admin);
@@ -339,6 +397,85 @@ describe("Critical Alert Notification Integration Tests", () => {
       for (const email of emailsA) {
         expect(emailsB).not.toContain(email);
       }
+    });
+  });
+
+  describe("online and sync parity", () => {
+    it("triggers critical notification from online movement path", async () => {
+      const admin = await createTestTenant();
+      const ctx = await createTenantContext(admin);
+
+      const product = await ctx.caller.products.create({
+        name: "Online Movement Product",
+        category: "Test",
+        price: 100,
+        quantity: 75,
+      });
+
+      const sendEmailsMock = vi.mocked(sendCriticalAlertEmailsToRecipients);
+      sendEmailsMock.mockClear();
+
+      await inventoryService.createMovement({
+        db: testDb,
+        tenantId: admin.tenantId,
+        userId: admin.userId,
+        productId: product.id,
+        type: "exit",
+        quantity: 30,
+        idempotencyKey: "inv-move-red-transition",
+      });
+
+      expect(sendEmailsMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not duplicate notifications on sync replay duplicates", async () => {
+      const admin = await createTestTenant();
+      const ctx = await createTenantContext(admin);
+
+      const product = await ctx.caller.products.create({
+        name: "Sync Replay Product",
+        category: "Test",
+        price: 100,
+        quantity: 75,
+      });
+
+      const operationId = "sync-red-transition-op";
+      const operation = {
+        operationId,
+        idempotencyKey: operationId,
+        entityId: product.id,
+        entityType: "stockMovement" as const,
+        operationType: "create" as const,
+        tenantId: admin.tenantId,
+        payload: {
+          tenantId: admin.tenantId,
+          productId: product.id,
+          type: "exit",
+          quantity: 30,
+          idempotencyKey: operationId,
+        },
+      };
+
+      const sendEmailsMock = vi.mocked(sendCriticalAlertEmailsToRecipients);
+      sendEmailsMock.mockClear();
+
+      const first = await processSync({
+        db: testDb,
+        tenantId: admin.tenantId,
+        userId: admin.userId,
+        operations: [operation],
+      });
+
+      const replay = await processSync({
+        db: testDb,
+        tenantId: admin.tenantId,
+        userId: admin.userId,
+        operations: [operation],
+      });
+
+      expect(first.results[0]?.status).toBe("success");
+      expect(replay.results[0]?.status).toBe("duplicate");
+      expect(sendEmailsMock).toHaveBeenCalledTimes(1);
     });
   });
 });

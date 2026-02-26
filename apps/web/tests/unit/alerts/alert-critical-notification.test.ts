@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { shouldTriggerCriticalNotification } from "~/server/services/alert-service";
+import {
+  resolveTenantMembersForCriticalAlert,
+  shouldTriggerCriticalNotification,
+} from "~/server/services/alert-service";
 import type { AlertLevel } from "~/schemas/alerts";
 
 describe("shouldTriggerCriticalNotification", () => {
@@ -63,5 +66,33 @@ describe("shouldTriggerCriticalNotification", () => {
     it("returns false for red to orange", () => {
       expect(shouldTriggerCriticalNotification("red", "orange")).toBe(false);
     });
+  });
+});
+
+describe("resolveTenantMembersForCriticalAlert", () => {
+  it("deduplicates recipients with duplicated membership rows", async () => {
+    const mockedDb = {
+      select: () => ({
+        from: () => ({
+          innerJoin: () => ({
+            where: async () => [
+              { userId: "user-1", email: "user-1@example.com" },
+              { userId: "user-1", email: "user-1@example.com" },
+              { userId: "user-2", email: "user-2@example.com" },
+            ],
+          }),
+        }),
+      }),
+    } as unknown;
+
+    const recipients = await resolveTenantMembersForCriticalAlert(
+      mockedDb as never,
+      "tenant-1"
+    );
+
+    expect(recipients).toEqual([
+      { userId: "user-1", email: "user-1@example.com" },
+      { userId: "user-2", email: "user-2@example.com" },
+    ]);
   });
 });
