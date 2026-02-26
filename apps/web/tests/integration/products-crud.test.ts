@@ -100,6 +100,47 @@ describe("Products CRUD", () => {
     expect(deletedRow?.deletedAt).not.toBeNull();
   });
 
+  it("returns distinct category and unit suggestions for active products", async () => {
+    const admin = await createTestTenant();
+    const adminCtx = await createTenantContext(admin);
+
+    await adminCtx.caller.products.create({
+      name: "Flour",
+      category: "Raw Materials",
+      unit: "kg",
+      price: 12,
+      quantity: 20,
+    });
+
+    const bakeryProduct = await adminCtx.caller.products.create({
+      name: "Box",
+      category: "Bakery",
+      unit: "pcs",
+      price: 2,
+      quantity: 5,
+    });
+
+    await adminCtx.caller.products.create({
+      name: "Sugar",
+      category: "Raw Materials",
+      unit: "kg",
+      price: 7,
+      quantity: 15,
+    });
+
+    let suggestions = await adminCtx.caller.products.suggestions();
+
+    expect(suggestions.categories).toEqual(["Bakery", "Raw Materials"]);
+    expect(suggestions.units).toEqual(["kg", "pcs"]);
+
+    await adminCtx.caller.products.delete({ id: bakeryProduct.id });
+
+    suggestions = await adminCtx.caller.products.suggestions();
+
+    expect(suggestions.categories).toEqual(["Raw Materials"]);
+    expect(suggestions.units).toEqual(["kg"]);
+  });
+
   it("does not allow Operator to update purchasePrice", async () => {
     const admin = await createTestTenant();
     const operator = await addUserToTenantWithRole(admin.tenantId, "Operator");

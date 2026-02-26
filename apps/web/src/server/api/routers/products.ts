@@ -210,6 +210,59 @@ export const productsRouter = createTRPCRouter({
     };
   }),
 
+  suggestions: protectedProcedure
+    .output(
+      z.object({
+        categories: z.array(z.string()),
+        units: z.array(z.string()),
+      })
+    )
+    .query(async ({ ctx }) => {
+      const userId = ctx.session.user.id;
+      const tenantId = ctx.tenantId!;
+      const membership = await ctx.db.query.tenantMemberships.findFirst({
+        columns: { role: true },
+        where: (tm, { and: andExpr, eq: eqExpr }) =>
+          andExpr(eqExpr(tm.userId, userId), eqExpr(tm.tenantId, tenantId)),
+      });
+
+      if (!membership) {
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "User is not a member of this tenant",
+        });
+      }
+
+      const rows = await ctx.db
+        .select({
+          category: products.category,
+          unit: products.unit,
+        })
+        .from(products)
+        .where(and(eq(products.tenantId, tenantId), isNull(products.deletedAt)));
+
+      const categories = Array.from(
+        new Set(
+          rows
+            .map((row) => row.category?.trim())
+            .filter((category): category is string => Boolean(category))
+        )
+      ).sort((a, b) => a.localeCompare(b));
+
+      const units = Array.from(
+        new Set(
+          rows
+            .map((row) => row.unit?.trim())
+            .filter((unit): unit is string => Boolean(unit))
+        )
+      ).sort((a, b) => a.localeCompare(b));
+
+      return {
+        categories,
+        units,
+      };
+    }),
+
   getById: protectedProcedure
     .input(z.object({ id: z.string().uuid() }))
     .output(productOutputSchema)

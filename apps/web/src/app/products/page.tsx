@@ -45,6 +45,13 @@ export default async function ProductsPage() {
             </Link>
 
             <Link
+              href="/inventory"
+              className="inline-flex items-center rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-emerald-700"
+            >
+              Record Movement
+            </Link>
+
+            <Link
               href="/dashboard"
               className="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-100"
             >

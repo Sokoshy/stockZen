@@ -35,12 +35,20 @@ export default async function InventoryPage() {
             </p>
           </div>
 
-          <Link
-            href="/products"
-            className="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-100"
-          >
-            Back to products
-          </Link>
+          <div className="flex gap-2">
+            <Link
+              href="/products"
+              className="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-100"
+            >
+              Back to products
+            </Link>
+            <Link
+              href="/dashboard"
+              className="inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-100"
+            >
+              Back to dashboard
+            </Link>
+          </div>
         </div>
 
         <div className="mb-4">

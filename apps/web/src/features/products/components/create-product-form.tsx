@@ -59,12 +59,16 @@ interface CreateProductFormProps {
   tenantId: string;
   canWritePurchasePrice: boolean;
   tenantDefaultThresholds?: { criticalThreshold: number; attentionThreshold: number };
+  existingCategories?: string[];
+  existingUnits?: string[];
 }
 
-export function CreateProductForm({ 
-  tenantId, 
+export function CreateProductForm({
+  tenantId,
   canWritePurchasePrice,
-  tenantDefaultThresholds = { criticalThreshold: 50, attentionThreshold: 100 }
+  tenantDefaultThresholds = { criticalThreshold: 50, attentionThreshold: 100 },
+  existingCategories = [],
+  existingUnits = [],
 }: CreateProductFormProps) {
   const router = useRouter();
   const [isOffline, setIsOffline] = useState(false);
@@ -214,8 +218,21 @@ export function CreateProductForm({
             {...register("category")}
             type="text"
             id="category"
+            list="existing-categories"
             className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
+          {existingCategories.length > 0 && (
+            <>
+              <datalist id="existing-categories">
+                {existingCategories.map((category) => (
+                  <option key={category} value={category} />
+                ))}
+              </datalist>
+              <p className="mt-1 text-xs text-gray-500">
+                Reuse existing category names from previous products.
+              </p>
+            </>
+          )}
           {errors.category && (
             <p className="mt-1 text-sm text-red-600">{errors.category.message}</p>
           )}
@@ -229,9 +246,20 @@ export function CreateProductForm({
             {...register("unit")}
             type="text"
             id="unit"
+            list="existing-units"
             placeholder="e.g., kg, pcs, box"
             className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
+          {existingUnits.length > 0 && (
+            <>
+              <datalist id="existing-units">
+                {existingUnits.map((unit) => (
+                  <option key={unit} value={unit} />
+                ))}
+              </datalist>
+              <p className="mt-1 text-xs text-gray-500">Reuse existing units from previous products.</p>
+            </>
+          )}
           {errors.unit && <p className="mt-1 text-sm text-red-600">{errors.unit.message}</p>}
         </div>
 
