@@ -71,7 +71,7 @@ development_status:
   epic-4: in-progress
   4-1-dashboard-stock-overview-alerts-first-key-stats: done
   4-2-alerts-dashboard-active-alerts-sorted-by-priority: done
-  4-3-pmi-indicator-mvp-formula-based-on-r-o-g-distribution: backlog
+  4-3-pmi-indicator-mvp-formula-based-on-r-o-g-distribution: done
   epic-4-retrospective: optional
 
   epic-5: backlog
