@@ -1,6 +1,6 @@
 # Story 3.5: Email Notifications for Critical (Red) Alerts (All Tenant Members)
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -263,6 +263,12 @@ openai/gpt-5.3-codex
 - ✅ Created `critical-alert-email.ts` service with retry logic (2 attempts, 5s timeout, retryable status codes).
 - ✅ Added `CRITICAL_ALERT_EMAIL_WEBHOOK_URL` environment variable for webhook configuration.
 - ✅ All 4 acceptance criteria satisfied with comprehensive test coverage.
+- ✅ Hardened red-transition notifications against concurrent orange -> red updates using guarded conditional updates.
+- ✅ Added explicit structured warning and skip path when email transport is not configured.
+- ✅ Added defensive recipient deduplication by `userId` before delivery.
+- ✅ Expanded coverage for concurrent transition dedupe and online vs sync behavior parity.
+- ✅ Fixed Vitest discovery configuration to inherit default excludes and keep `tests/e2e` out of unit/integration runs.
+- ✅ Validation refreshed: `bun run --cwd apps/web typecheck` and targeted Story 3.5 test suites pass.
 
 ### File List
 
@@ -274,3 +280,5 @@ openai/gpt-5.3-codex
 - `apps/web/tests/unit/alerts/alert-critical-notification.test.ts`
 - `apps/web/tests/unit/alerts/critical-alert-email.test.ts`
 - `apps/web/tests/integration/critical-alert-notification.test.ts`
+- `apps/web/tests/ui/active-alerts-list.test.tsx`
+- `apps/web/vitest.config.ts`

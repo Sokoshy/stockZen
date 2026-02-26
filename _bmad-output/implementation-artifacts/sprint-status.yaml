@@ -65,12 +65,12 @@ development_status:
   3-2-configure-per-product-thresholds-optional-override-of-defaults: done
   3-3-automatic-alert-generation-r-o-g-classification-one-active-alert-per-product: done
   3-4-alert-triage-handled-vs-snoozed-ignored: done
-  3-5-email-notifications-for-critical-red-alerts-all-tenant-members: review
+  3-5-email-notifications-for-critical-red-alerts-all-tenant-members: done
   epic-3-retrospective: optional
 
   epic-4: in-progress
   4-1-dashboard-stock-overview-alerts-first-key-stats: done
-  4-2-alerts-dashboard-active-alerts-sorted-by-priority: backlog
+  4-2-alerts-dashboard-active-alerts-sorted-by-priority: ready-for-dev
   4-3-pmi-indicator-mvp-formula-based-on-r-o-g-distribution: backlog
   epic-4-retrospective: optional
 
