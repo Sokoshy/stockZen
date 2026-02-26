@@ -38,6 +38,9 @@ export function AlertCard({
         <div>
           <p className="text-sm font-medium text-gray-900">{alert.productName}</p>
           <p className="text-xs text-gray-500">Stock: {alert.currentStock}</p>
+          <p className="text-xs text-gray-400">
+            Updated: {new Date(alert.updatedAt).toLocaleString()}
+          </p>
         </div>
         {alert.snoozedUntil && (
           <span className="text-xs text-gray-400 italic">
