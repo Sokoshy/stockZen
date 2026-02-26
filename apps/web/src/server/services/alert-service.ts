@@ -3,7 +3,7 @@ import { alerts, products, tenantMemberships, tenants, user } from "~/server/db/
 import { logger } from "~/server/logger";
 import {
   buildProductUrl,
-  queueCriticalAlertEmails,
+  sendCriticalAlertEmailsToRecipients,
   type CriticalAlertEmailRecipient,
 } from "~/server/services/critical-alert-email";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -161,7 +161,7 @@ export async function dispatchCriticalAlertNotification(
 
   const productUrl = buildProductUrl(productId);
 
-  queueCriticalAlertEmails(recipients, {
+  const deliveryResult = await sendCriticalAlertEmailsToRecipients(recipients, {
     productName,
     productId,
     currentStock,
@@ -170,8 +170,14 @@ export async function dispatchCriticalAlertNotification(
   });
 
   logger.info(
-    { tenantId, productId, recipientCount: recipients.length },
-    "Critical alert notification queued"
+    {
+      tenantId,
+      productId,
+      recipientCount: recipients.length,
+      deliveredCount: deliveryResult.successCount,
+      failedCount: deliveryResult.failedCount,
+    },
+    "Critical alert notification delivery completed"
   );
 }
 

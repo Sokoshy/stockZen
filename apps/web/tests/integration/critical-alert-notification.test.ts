@@ -3,7 +3,7 @@
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { alerts, tenantMemberships } from "~/server/db/schema";
+import { alerts, products, tenantMemberships } from "~/server/db/schema";
 import {
   recomputeAlertsForProducts,
   snoozeForEightHours,
@@ -84,7 +84,7 @@ describe("Critical Alert Notification Integration Tests", () => {
         name: "Test Product",
         category: "Test",
         price: 100,
-        quantity: 30,
+        quantity: 150,
       });
 
       const pendingNotifications: CriticalAlertNotificationTask[] = [];
@@ -154,7 +154,7 @@ describe("Critical Alert Notification Integration Tests", () => {
         name: "Test Product",
         category: "Test",
         price: 100,
-        quantity: 30,
+        quantity: 150,
       });
 
       const firstNotifications: CriticalAlertNotificationTask[] = [];
@@ -194,7 +194,7 @@ describe("Critical Alert Notification Integration Tests", () => {
         name: "Test Product",
         category: "Test",
         price: 100,
-        quantity: 30,
+        quantity: 150,
       });
 
       const firstNotifications: CriticalAlertNotificationTask[] = [];
@@ -298,8 +298,13 @@ describe("Critical Alert Notification Integration Tests", () => {
         name: "Default Threshold Product",
         category: "Test",
         price: 100,
-        quantity: 25,
+        quantity: 150,
       });
+
+      await testDb
+        .update(products)
+        .set({ quantity: 25, updatedAt: new Date() })
+        .where(and(eq(products.id, product.id), eq(products.tenantId, admin.tenantId)));
 
       const pendingNotifications: CriticalAlertNotificationTask[] = [];
 
