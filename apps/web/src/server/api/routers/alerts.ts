@@ -41,6 +41,37 @@ export const alertsRouter = createTRPCRouter({
       };
     }),
 
+  dashboard: protectedProcedure
+    .input(listActiveAlertsInputSchema)
+    .output(listActiveAlertsOutputSchema)
+    .query(async ({ ctx, input }) => {
+      const userId = ctx.session.user.id;
+      const tenantId = ctx.tenantId!;
+
+      const { alerts, nextCursor } = await listActiveAlerts({
+        db: ctx.db,
+        tenantId,
+        cursor: input.cursor,
+        limit: input.limit ?? 20,
+      });
+
+      logger.debug({ userId, tenantId, alertCount: alerts.length }, "Alerts dashboard listed");
+
+      return {
+        alerts: alerts.map((alert) => ({
+          id: alert.id,
+          productId: alert.productId,
+          productName: alert.productName,
+          level: alert.level,
+          currentStock: alert.currentStock,
+          snoozedUntil: alert.snoozedUntil?.toISOString() ?? null,
+          createdAt: alert.createdAt.toISOString(),
+          updatedAt: alert.updatedAt.toISOString(),
+        })),
+        nextCursor,
+      };
+    }),
+
   markHandled: protectedProcedure
     .input(markHandledInputSchema)
     .mutation(async ({ ctx, input }) => {
