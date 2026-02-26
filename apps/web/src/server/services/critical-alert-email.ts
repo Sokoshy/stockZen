@@ -18,6 +18,18 @@ export type CriticalAlertEmailPayload = {
   productUrl: string;
 };
 
+export type CriticalAlertDeliveryFailure = {
+  userId: string;
+  reason: string;
+};
+
+export type CriticalAlertBatchDeliveryResult = {
+  configured: boolean;
+  successCount: number;
+  failedCount: number;
+  failedDeliveries: CriticalAlertDeliveryFailure[];
+};
+
 type CriticalAlertWebhookPayload = {
   template: "critical-alert";
   to: string;
@@ -123,13 +135,13 @@ export async function sendCriticalAlertEmail(
 ): Promise<void> {
   const resolvedWebhookUrl = webhookUrl ?? env.CRITICAL_ALERT_EMAIL_WEBHOOK_URL;
   if (!resolvedWebhookUrl) {
-    logger.info(
+    logger.warn(
       {
-        event: "alerts.critical.email_delivery.skipped",
+        event: "alerts.critical.email_delivery.misconfigured",
         productId: payload.productId,
         userId: recipient.userId,
       },
-      "Critical alert email transport is not configured"
+      "Critical alert email delivery skipped because transport is not configured"
     );
     return;
   }
@@ -156,29 +168,46 @@ export async function sendCriticalAlertEmail(
 
 export async function sendCriticalAlertEmailsToRecipients(
   recipients: CriticalAlertEmailRecipient[],
-  payload: CriticalAlertEmailPayload
-): Promise<void> {
-  const webhookUrl = env.CRITICAL_ALERT_EMAIL_WEBHOOK_URL;
-  if (!webhookUrl) {
-    logger.info(
+  payload: CriticalAlertEmailPayload,
+  webhookUrl?: string
+): Promise<CriticalAlertBatchDeliveryResult> {
+  const resolvedWebhookUrl = webhookUrl ?? env.CRITICAL_ALERT_EMAIL_WEBHOOK_URL;
+  if (!resolvedWebhookUrl) {
+    logger.warn(
       {
-        event: "alerts.critical.email_delivery.batch_skipped",
+        event: "alerts.critical.email_delivery.batch_misconfigured",
         productId: payload.productId,
         recipientCount: recipients.length,
       },
-      "Critical alert email transport is not configured"
+      "Critical alert email delivery skipped because transport is not configured"
     );
-    return;
+    return {
+      configured: false,
+      successCount: 0,
+      failedCount: 0,
+      failedDeliveries: [],
+    };
   }
 
   const results = await Promise.allSettled(
     recipients.map((recipient) =>
-      sendCriticalAlertEmail(recipient, payload, webhookUrl)
+      sendCriticalAlertEmail(recipient, payload, resolvedWebhookUrl)
     )
   );
 
   const failedCount = results.filter((r) => r.status === "rejected").length;
   const successCount = results.filter((r) => r.status === "fulfilled").length;
+  const failedDeliveries: CriticalAlertDeliveryFailure[] = [];
+
+  results.forEach((result, index) => {
+    if (result.status === "rejected") {
+      failedDeliveries.push({
+        userId: recipients[index]?.userId ?? "unknown",
+        reason:
+          result.reason instanceof Error ? result.reason.message : "unknown",
+      });
+    }
+  });
 
   if (failedCount > 0) {
     logger.warn(
@@ -187,6 +216,7 @@ export async function sendCriticalAlertEmailsToRecipients(
         productId: payload.productId,
         successCount,
         failedCount,
+        failedDeliveries,
       },
       "Some critical alert emails failed to send"
     );
@@ -200,6 +230,13 @@ export async function sendCriticalAlertEmailsToRecipients(
       "All critical alert emails sent successfully"
     );
   }
+
+  return {
+    configured: true,
+    successCount,
+    failedCount,
+    failedDeliveries,
+  };
 }
 
 export function queueCriticalAlertEmails(

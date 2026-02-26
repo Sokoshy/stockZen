@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildProductUrl,
   sendCriticalAlertEmail,
+  sendCriticalAlertEmailsToRecipients,
   queueCriticalAlertEmails,
   type CriticalAlertEmailRecipient,
   type CriticalAlertEmailPayload,
@@ -178,6 +179,76 @@ describe("critical alert email utility", () => {
       const result = queueCriticalAlertEmails(recipients, defaultPayload);
 
       expect(result).toBeUndefined();
+    });
+  });
+
+  describe("sendCriticalAlertEmailsToRecipients", () => {
+    it("sends one request per recipient and returns delivery summary", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(null, {
+          status: 202,
+        })
+      );
+
+      const recipients: CriticalAlertEmailRecipient[] = [
+        { email: "user1@example.com", userId: "user-1" },
+        { email: "user2@example.com", userId: "user-2" },
+      ];
+
+      const result = await sendCriticalAlertEmailsToRecipients(
+        recipients,
+        defaultPayload,
+        "https://example.com/webhooks/critical-alert"
+      );
+
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(result.configured).toBe(true);
+      expect(result.successCount).toBe(2);
+      expect(result.failedCount).toBe(0);
+      expect(result.failedDeliveries).toHaveLength(0);
+    });
+
+    it("returns failed recipient details when one delivery fails", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(new Response(null, { status: 202 }))
+        .mockResolvedValueOnce(new Response(null, { status: 400 }));
+
+      const recipients: CriticalAlertEmailRecipient[] = [
+        { email: "user1@example.com", userId: "user-1" },
+        { email: "user2@example.com", userId: "user-2" },
+      ];
+
+      const result = await sendCriticalAlertEmailsToRecipients(
+        recipients,
+        defaultPayload,
+        "https://example.com/webhooks/critical-alert"
+      );
+
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(result.configured).toBe(true);
+      expect(result.successCount).toBe(1);
+      expect(result.failedCount).toBe(1);
+      expect(result.failedDeliveries).toHaveLength(1);
+      expect(result.failedDeliveries[0]).toMatchObject({
+        userId: "user-2",
+      });
+      expect(result.failedDeliveries[0]?.reason).toMatch(/transport returned 400/i);
+    });
+
+    it("returns misconfigured summary when webhook is missing", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+      const result = await sendCriticalAlertEmailsToRecipients(
+        [defaultRecipient],
+        defaultPayload,
+        ""
+      );
+
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(result.configured).toBe(false);
+      expect(result.successCount).toBe(0);
+      expect(result.failedCount).toBe(0);
+      expect(result.failedDeliveries).toHaveLength(0);
     });
   });
 });
