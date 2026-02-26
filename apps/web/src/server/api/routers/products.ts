@@ -20,7 +20,13 @@ import {
 import { canWritePurchasePrice } from "~/server/auth/rbac-policy";
 import { products, alerts, tenants } from "~/server/db/schema";
 import { logger } from "~/server/logger";
-import { updateAlertLifecycle, classifyAlertLevel, resolveEffectiveThresholds } from "~/server/services/alert-service";
+import {
+  updateAlertLifecycle,
+  flushPendingCriticalAlertNotifications,
+  classifyAlertLevel,
+  resolveEffectiveThresholds,
+  type CriticalAlertNotificationTask,
+} from "~/server/services/alert-service";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "~/server/db/schema";
 
@@ -302,30 +308,55 @@ export const productsRouter = createTRPCRouter({
       const customCriticalThreshold = thresholdMode === "custom" ? fullInput.customCriticalThreshold ?? null : null;
       const customAttentionThreshold = thresholdMode === "custom" ? fullInput.customAttentionThreshold ?? null : null;
 
-      const [product] = await ctx.db
-        .insert(products)
-        .values({
-          name: fullInput.name,
-          price: fullInput.price.toString(),
+      const pendingCriticalNotifications: CriticalAlertNotificationTask[] = [];
+
+      const product = await ctx.db.transaction(async (tx) => {
+        const [createdProduct] = await tx
+          .insert(products)
+          .values({
+            name: fullInput.name,
+            price: fullInput.price.toString(),
+            tenantId,
+            description: fullInput.description ?? null,
+            sku: fullInput.sku ?? null,
+            category: fullInput.category ?? null,
+            unit: fullInput.unit ?? null,
+            barcode: fullInput.barcode ?? null,
+            quantity: fullInput.quantity ?? 0,
+            lowStockThreshold: fullInput.lowStockThreshold ?? null,
+            purchasePrice: fullInput.purchasePrice?.toString() ?? null,
+            customCriticalThreshold,
+            customAttentionThreshold,
+          })
+          .returning();
+
+        if (!createdProduct) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Failed to create product",
+          });
+        }
+
+        await updateAlertLifecycle({
+          db: tx,
           tenantId,
-          description: fullInput.description ?? null,
-          sku: fullInput.sku ?? null,
-          category: fullInput.category ?? null,
-          unit: fullInput.unit ?? null,
-          barcode: fullInput.barcode ?? null,
-          quantity: fullInput.quantity ?? 0,
-          lowStockThreshold: fullInput.lowStockThreshold ?? null,
-          purchasePrice: fullInput.purchasePrice?.toString() ?? null,
-          customCriticalThreshold,
-          customAttentionThreshold,
-        })
-        .returning();
+          productId: createdProduct.id,
+          currentStock: createdProduct.quantity,
+          pendingCriticalNotifications,
+        });
+
+        return createdProduct;
+      });
 
       if (!product) {
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: "Failed to create product",
         });
+      }
+
+      if (pendingCriticalNotifications.length > 0) {
+        await flushPendingCriticalAlertNotifications(ctx.db, pendingCriticalNotifications);
       }
 
       logger.info({ userId, tenantId, role, productId: product.id }, "Product created");

@@ -3,7 +3,7 @@
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { products } from "~/server/db/schema";
+import { alerts, products } from "~/server/db/schema";
 import {
   addUserToTenantWithRole,
   cleanTestDatabase,
@@ -44,6 +44,31 @@ describe("Products CRUD", () => {
     expect(updated.category).toBe("Bakery");
     expect(updated.barcode).toBe("FLOUR-002");
     expect(updated.price).toBe(14);
+  });
+
+  it("creates an active red alert when a new product starts below critical threshold", async () => {
+    const admin = await createTestTenant();
+    const adminCtx = await createTenantContext(admin);
+
+    const created = await adminCtx.caller.products.create({
+      name: "Low Stock Flour",
+      category: "Raw Materials",
+      unit: "kg",
+      price: 12,
+      quantity: 10,
+    });
+
+    const createdAlert = await testDb.query.alerts.findFirst({
+      where: and(
+        eq(alerts.tenantId, admin.tenantId),
+        eq(alerts.productId, created.id),
+        eq(alerts.status, "active")
+      ),
+    });
+
+    expect(createdAlert).toBeDefined();
+    expect(createdAlert?.level).toBe("red");
+    expect(createdAlert?.currentStock).toBe(10);
   });
 
   it("soft deletes products and hides them from list", async () => {
