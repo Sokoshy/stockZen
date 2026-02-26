@@ -90,6 +90,12 @@ export function DashboardPageClient() {
           </p>
           <div className="mt-4 flex flex-wrap gap-3">
             <Link
+              href="/alerts"
+              className="inline-flex items-center rounded-md bg-amber-600 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-500"
+            >
+              View All Alerts
+            </Link>
+            <Link
               href="/products"
               className="inline-flex items-center rounded-md bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
             >
