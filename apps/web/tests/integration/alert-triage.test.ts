@@ -786,7 +786,7 @@ describe("Alert Triage Integration Tests", () => {
       expect(allAlerts.map((alert) => alert.currentStock)).toEqual([10, 30, 70, 90]);
     });
 
-    it("dashboard stats exclude currently snoozed alerts", async () => {
+    it("dashboard stats exclude currently snoozed alerts while PMI still reflects product health", async () => {
       const admin = await createTestTenant();
       const ctx = await createTenantContext(admin);
 
@@ -826,7 +826,7 @@ describe("Alert Triage Integration Tests", () => {
       const stats = await ctx.caller.dashboard.stats();
       expect(stats.totalProducts).toBe(2);
       expect(stats.activeAlertsCount).toBe(1);
-      expect(stats.pmi).toBeNull();
+      expect(stats.pmi).toBe(60);
     });
   });
 });
