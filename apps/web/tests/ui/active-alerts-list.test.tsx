@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ActiveAlertsList } from "~/features/alerts/components/active-alerts-list";
 
 const invalidateMock = vi.fn();
+const invalidateDashboardStatsMock = vi.fn();
 const listActiveUseQueryMock = vi.fn();
 const markHandledUseMutationMock = vi.fn();
 const snoozeUseMutationMock = vi.fn();
@@ -21,6 +22,11 @@ vi.mock("~/trpc/react", () => ({
       alerts: {
         listActive: {
           invalidate: invalidateMock,
+        },
+      },
+      dashboard: {
+        stats: {
+          invalidate: invalidateDashboardStatsMock,
         },
       },
     }),
@@ -113,6 +119,7 @@ describe("ActiveAlertsList", () => {
 
     await waitFor(() => {
       expect(invalidateMock).toHaveBeenCalled();
+      expect(invalidateDashboardStatsMock).toHaveBeenCalled();
       expect(onAlertHandled).toHaveBeenCalled();
     });
   });
@@ -129,6 +136,7 @@ describe("ActiveAlertsList", () => {
 
     await waitFor(() => {
       expect(invalidateMock).toHaveBeenCalled();
+      expect(invalidateDashboardStatsMock).toHaveBeenCalled();
       expect(onAlertHandled).toHaveBeenCalled();
     });
   });
