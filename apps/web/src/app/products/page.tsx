@@ -24,6 +24,7 @@ export default async function ProductsPage() {
   }
 
   const data = await api.products.list();
+  const canImportProducts = membership.role === "Admin" || membership.role === "Manager";
 
   return (
     <div className="min-h-screen bg-gray-50 px-4 py-8 sm:px-6 lg:px-8">
@@ -43,6 +44,15 @@ export default async function ProductsPage() {
             >
               Create Product
             </Link>
+
+            {canImportProducts && (
+              <Link
+                href="/products/import"
+                className="inline-flex items-center rounded-md bg-amber-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-amber-700"
+              >
+                Import CSV
+              </Link>
+            )}
 
             <Link
               href="/inventory"
