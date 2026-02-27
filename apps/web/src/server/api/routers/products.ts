@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, isNull, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import {
@@ -576,4 +576,37 @@ export const productsRouter = createTRPCRouter({
 
       return { success: true, id: input.id };
     }),
+
+  import: protectedProcedure.mutation(async ({ ctx }) => {
+    const userId = ctx.session.user.id;
+    const tenantId = ctx.tenantId!;
+    const membership = await ctx.db.query.tenantMemberships.findFirst({
+      columns: { role: true },
+      where: (tm, { and: andExpr, eq: eqExpr }) =>
+        andExpr(eqExpr(tm.userId, userId), eqExpr(tm.tenantId, tenantId)),
+    });
+
+    if (!membership) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "User is not a member of this tenant",
+      });
+    }
+
+    if (membership.role !== "Admin" && membership.role !== "Manager") {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Only Admin and Manager roles can import products",
+      });
+    }
+
+    logger.info({ userId, tenantId, role: membership.role }, "CSV import initiated");
+
+    return {
+      success: true,
+      importedCount: 0,
+      totalRows: 0,
+      errors: [],
+    };
+  }),
 });
