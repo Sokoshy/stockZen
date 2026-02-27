@@ -239,3 +239,23 @@ export const listProductsOutputSchema = z.object({
 });
 
 export type ListProductsOutput = z.infer<typeof listProductsOutputSchema>;
+
+export const productImportInputSchema = z.object({
+  file: z.instanceof(File),
+});
+
+export const productImportOutputSchema = z.object({
+  success: z.boolean(),
+  importedCount: z.number(),
+  totalRows: z.number(),
+  errors: z.array(
+    z.object({
+      rowNumber: z.number(),
+      field: z.string(),
+      message: z.string(),
+    })
+  ),
+  errorReportUrl: z.string().optional(),
+});
+
+export type ProductImportOutput = z.infer<typeof productImportOutputSchema>;
