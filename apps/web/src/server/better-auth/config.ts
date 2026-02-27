@@ -7,11 +7,19 @@ import { logger } from "~/server/logger";
 
 import { queuePasswordResetEmail } from "./password-reset-email";
 
+import { user, session, account, verification } from "~/server/db/schema";
+
 export const auth = betterAuth({
   baseURL: env.BETTER_AUTH_BASE_URL,
   secret: env.BETTER_AUTH_SECRET,
   database: drizzleAdapter(db, {
     provider: "pg",
+    schema: {
+      user: user,
+      session: session,
+      account: account,
+      verification: verification,
+    },
   }),
   emailAndPassword: {
     enabled: true,

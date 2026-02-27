@@ -20,7 +20,7 @@ export const createTable = pgTableCreator((name) => `pg-drizzle_${name}`);
 // Better Auth Tables (managed by Better Auth)
 // ============================================
 
-export const user = pgTable("user", {
+export const user = pgTable("users", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
