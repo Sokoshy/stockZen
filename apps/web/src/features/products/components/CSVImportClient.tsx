@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useState, useTransition } from "react";
 import { useDropzone } from "react-dropzone";
 import { useQueryClient } from "@tanstack/react-query";
@@ -185,6 +186,9 @@ export function CSVImportClient({ allowedRoles, membership }: CSVImportClientPro
 
   const invalidRows = preview.filter((r) => !r.isValid);
   const validRows = preview.filter((r) => r.isValid);
+  const importNeedsUpgrade = importResult?.errors.some((error) =>
+    error.message.includes("Upgrade in Billing settings")
+  ) ?? false;
 
   const handleClear = () => {
     setFile(null);
@@ -224,6 +228,14 @@ export function CSVImportClient({ allowedRoles, membership }: CSVImportClientPro
 
             {importResult.errors.length > 0 && (
               <div className="mt-4">
+                {importNeedsUpgrade ? (
+                  <Link
+                    href="/settings/billing"
+                    className="mb-3 inline-flex text-sm font-medium text-red-700 underline underline-offset-2"
+                  >
+                    Open Billing settings
+                  </Link>
+                ) : null}
                 <button
                   onClick={handleDownloadErrorReport}
                   className="inline-flex items-center rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"

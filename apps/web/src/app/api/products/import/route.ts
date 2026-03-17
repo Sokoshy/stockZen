@@ -81,9 +81,10 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     logger.error({ error }, "CSV import error");
     const errorMessage = error instanceof Error ? error.message : "Import failed";
+    const status = errorMessage.startsWith("Product limit reached") ? 403 : 500;
     return NextResponse.json(
       { error: errorMessage },
-      { status: 500 }
+      { status }
     );
   }
 }

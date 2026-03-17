@@ -5,6 +5,11 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { products, tenants } from "~/server/db/schema";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "~/server/db/schema";
+import {
+  BILLING_UPGRADE_ROUTE,
+  checkProductLimit,
+  lockTenantSubscription,
+} from "~/server/services/subscription-service";
 
 type DBClient = PostgresJsDatabase<typeof schema>;
 
@@ -219,31 +224,50 @@ export async function importCSVHandler({
   }
 
   try {
-    const tenant = await ctx.db.query.tenants.findFirst({
-      where: eq(tenants.id, tenantId),
-      columns: {
-        defaultCriticalThreshold: true,
-        defaultAttentionThreshold: true,
-      },
+    const inserted = await ctx.db.transaction(async (tx) => {
+      await lockTenantSubscription({
+        db: tx,
+        tenantId,
+      });
+
+      const productLimitCheck = await checkProductLimit({
+        db: tx,
+        tenantId,
+      });
+
+      const remainingSlots = productLimitCheck.limit - productLimitCheck.currentCount;
+      if (remainingSlots < validRows.length) {
+        throw new Error(
+          `Product limit reached. Your ${productLimitCheck.plan} plan allows a maximum of ${productLimitCheck.limit} products. Upgrade in Billing settings: ${BILLING_UPGRADE_ROUTE}`
+        );
+      }
+
+      const tenant = await tx.query.tenants.findFirst({
+        where: eq(tenants.id, tenantId),
+        columns: {
+          defaultCriticalThreshold: true,
+          defaultAttentionThreshold: true,
+        },
+      });
+
+      const insertRows = validRows.map((row) => ({
+        tenantId,
+        name: row.name,
+        category: row.category,
+        unit: row.unit,
+        price: row.price,
+        barcode: row.barcode || null,
+        quantity: 0,
+        purchasePrice: null,
+        description: null,
+        sku: null,
+        lowStockThreshold: null,
+        customCriticalThreshold: tenant?.defaultCriticalThreshold ?? null,
+        customAttentionThreshold: tenant?.defaultAttentionThreshold ?? null,
+      }));
+
+      return tx.insert(products).values(insertRows).returning();
     });
-
-    const insertRows = validRows.map((row) => ({
-      tenantId,
-      name: row.name,
-      category: row.category,
-      unit: row.unit,
-      price: row.price,
-      barcode: row.barcode || null,
-      quantity: 0,
-      purchasePrice: null,
-      description: null,
-      sku: null,
-      lowStockThreshold: null,
-      customCriticalThreshold: tenant?.defaultCriticalThreshold ?? null,
-      customAttentionThreshold: tenant?.defaultAttentionThreshold ?? null,
-    }));
-
-    const inserted = await ctx.db.insert(products).values(insertRows).returning();
 
     return {
       success: true,
