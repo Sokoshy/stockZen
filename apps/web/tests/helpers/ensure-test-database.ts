@@ -101,6 +101,34 @@ async function ensureTenantThresholdColumns(target: ReturnType<typeof postgres>)
   `);
 }
 
+async function ensureTenantSubscriptionPlanColumn(target: ReturnType<typeof postgres>): Promise<void> {
+  const tenantsTableExists = await target<{ exists: boolean }[]>`
+    select exists (
+      select 1
+      from information_schema.tables
+      where table_schema = 'public'
+        and table_name = 'tenants'
+    ) as exists
+  `;
+
+  if (!tenantsTableExists[0]?.exists) {
+    return;
+  }
+
+  await target.unsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'subscription_plan') THEN
+        CREATE TYPE subscription_plan AS ENUM ('Free', 'Starter', 'Pro');
+      END IF;
+    END
+    $$;
+
+    ALTER TABLE tenants
+      ADD COLUMN IF NOT EXISTS subscription_plan subscription_plan;
+  `);
+}
+
 async function ensureProductCustomThresholdColumns(target: ReturnType<typeof postgres>): Promise<void> {
   const productsTableExists = await target<{ exists: boolean }[]>`
     select exists (
@@ -184,6 +212,31 @@ async function ensureAlertsTable(target: ReturnType<typeof postgres>): Promise<v
   `);
 }
 
+async function ensureUsersTableName(target: ReturnType<typeof postgres>): Promise<void> {
+  const [legacyUserTable, usersTable] = await Promise.all([
+    target<{ exists: boolean }[]>`
+      select exists (
+        select 1
+        from information_schema.tables
+        where table_schema = 'public'
+          and table_name = 'user'
+      ) as exists
+    `,
+    target<{ exists: boolean }[]>`
+      select exists (
+        select 1
+        from information_schema.tables
+        where table_schema = 'public'
+          and table_name = 'users'
+      ) as exists
+    `,
+  ]);
+
+  if (legacyUserTable[0]?.exists && !usersTable[0]?.exists) {
+    await target.unsafe(`ALTER TABLE "user" RENAME TO "users";`);
+  }
+}
+
 export async function ensureTestDatabaseReady(): Promise<void> {
   const testDatabaseUrlRaw = getTestDatabaseUrl();
 
@@ -244,11 +297,13 @@ export async function ensureTestDatabaseReady(): Promise<void> {
         select 1
         from information_schema.tables
         where table_schema = 'public'
-          and table_name = 'user'
+          and table_name in ('user', 'users')
       ) as exists
     `;
 
     if (tableCheck[0]?.exists) {
+      await ensureUsersTableName(target);
+      await ensureTenantSubscriptionPlanColumn(target);
       await ensureProductStory21Columns(target);
       await ensureTenantThresholdColumns(target);
       await ensureProductCustomThresholdColumns(target);
@@ -266,6 +321,8 @@ export async function ensureTestDatabaseReady(): Promise<void> {
       await target.unsafe(migrationSql);
     }
 
+    await ensureUsersTableName(target);
+    await ensureTenantSubscriptionPlanColumn(target);
     await ensureProductStory21Columns(target);
     await ensureTenantThresholdColumns(target);
     await ensureProductCustomThresholdColumns(target);

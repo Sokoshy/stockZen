@@ -93,9 +93,16 @@ export const tenantRoleEnum = pgEnum("tenant_role", [
   "Operator",
 ]);
 
+export const subscriptionPlanEnum = pgEnum("subscription_plan", [
+  "Free",
+  "Starter",
+  "Pro",
+]);
+
 export const tenants = pgTable("tenants", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: varchar("name", { length: 255 }).notNull(),
+  subscriptionPlan: subscriptionPlanEnum("subscription_plan"),
   defaultCriticalThreshold: integer("default_critical_threshold").notNull().default(50),
   defaultAttentionThreshold: integer("default_attention_threshold").notNull().default(100),
   createdAt: timestamp("created_at", { withTimezone: true })
