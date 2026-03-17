@@ -6,6 +6,11 @@ import {
   updateAlertLifecycle,
   type CriticalAlertNotificationTask,
 } from "~/server/services/alert-service";
+import {
+  BILLING_UPGRADE_ROUTE,
+  checkProductLimit,
+  lockTenantSubscription,
+} from "~/server/services/subscription-service";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "~/server/db/schema";
 import type {
@@ -117,20 +122,6 @@ async function processProductCreate(
   const payload = operation.payload as Record<string, unknown>;
   const entityId = operation.entityId;
 
-  const existingProduct = await db.query.products.findFirst({
-    where: and(
-      eq(products.id, entityId),
-      eq(products.tenantId, tenantId)
-    ),
-  });
-
-  if (existingProduct) {
-    return {
-      status: "duplicate",
-      serverState: buildServerProductState(existingProduct),
-    };
-  }
-
   const thresholdModeRaw = payload.thresholdMode ?? "defaults";
   if (!isThresholdMode(thresholdModeRaw)) {
     return {
@@ -159,29 +150,85 @@ async function processProductCreate(
     customAttentionThreshold = parsedPair.attentionThreshold;
   }
 
-  const [newProduct] = await db
-    .insert(products)
-    .values({
-      id: entityId,
+  const creationResult = await db.transaction(async (tx) => {
+    await lockTenantSubscription({
+      db: tx,
       tenantId,
-      name: payload.name as string,
-      description: payload.description as string | null ?? null,
-      sku: payload.sku as string | null ?? null,
-      category: payload.category as string | null ?? null,
-      unit: payload.unit as string | null ?? null,
-      barcode: payload.barcode as string | null ?? null,
-      price: String(payload.price ?? 0),
-      purchasePrice: payload.purchasePrice != null ? String(payload.purchasePrice) : null,
-      quantity: (payload.quantity as number) ?? 0,
-      lowStockThreshold: payload.lowStockThreshold as number | null ?? null,
-      customCriticalThreshold,
-      customAttentionThreshold,
-    })
-    .returning();
+    });
 
-  if (!newProduct) {
+    const existingProduct = await tx.query.products.findFirst({
+      where: and(eq(products.id, entityId), eq(products.tenantId, tenantId)),
+    });
+
+    if (existingProduct) {
+      return {
+        status: "duplicate" as const,
+        product: existingProduct,
+      };
+    }
+
+    const productLimitCheck = await checkProductLimit({
+      db: tx,
+      tenantId,
+    });
+
+    if (!productLimitCheck.allowed) {
+      return {
+        status: "limit_reached" as const,
+      };
+    }
+
+    const [createdProduct] = await tx
+      .insert(products)
+      .values({
+        id: entityId,
+        tenantId,
+        name: payload.name as string,
+        description: payload.description as string | null ?? null,
+        sku: payload.sku as string | null ?? null,
+        category: payload.category as string | null ?? null,
+        unit: payload.unit as string | null ?? null,
+        barcode: payload.barcode as string | null ?? null,
+        price: String(payload.price ?? 0),
+        purchasePrice: payload.purchasePrice != null ? String(payload.purchasePrice) : null,
+        quantity: (payload.quantity as number) ?? 0,
+        lowStockThreshold: payload.lowStockThreshold as number | null ?? null,
+        customCriticalThreshold,
+        customAttentionThreshold,
+      })
+      .returning();
+
+    if (!createdProduct) {
+      return {
+        status: "failed" as const,
+      };
+    }
+
+    return {
+      status: "created" as const,
+      product: createdProduct,
+    };
+  });
+
+  if (creationResult.status === "duplicate") {
+    return {
+      status: "duplicate",
+      serverState: buildServerProductState(creationResult.product),
+    };
+  }
+
+  if (creationResult.status === "limit_reached") {
+    return {
+      status: "validation_error",
+      message: `Product limit reached. Upgrade in Billing settings: ${BILLING_UPGRADE_ROUTE}`,
+    };
+  }
+
+  if (creationResult.status === "failed") {
     return { status: "validation_error", message: "Failed to create product" };
   }
+
+  const newProduct = creationResult.product;
 
   logger.info({ productId: newProduct.id, tenantId }, "Product created via sync");
 

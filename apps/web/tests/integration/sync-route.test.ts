@@ -229,6 +229,62 @@ describe("POST /api/sync", () => {
     expect(syncedProduct?.name).toBe("Synced Product");
   });
 
+  it("rejects synced product creation when the tenant is already at the plan limit", async () => {
+    await db
+      .update(tenants)
+      .set({ subscriptionPlan: "Free" })
+      .where(eq(tenants.id, tenantId));
+
+    await db.insert(products).values(
+      Array.from({ length: 20 }, (_, index) => ({
+        tenantId,
+        name: `Existing Product ${index + 1}`,
+        category: "Test",
+        unit: "pcs",
+        price: "2.00",
+        quantity: 1,
+      }))
+    );
+
+    vi.mocked(auth.api.getSession).mockResolvedValue(mockSession(userId, `test-${userId}@example.com`, tenantId));
+
+    const operationId = crypto.randomUUID();
+    const request = new NextRequest("http://localhost/api/sync", {
+      method: "POST",
+      headers: new Headers({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        operations: [{
+          operationId,
+          idempotencyKey: operationId,
+          entityId: operationId,
+          entityType: "product",
+          operationType: "create",
+          tenantId,
+          payload: {
+            tenantId,
+            name: "Blocked Synced Product",
+            category: "Test",
+            unit: "pcs",
+            price: 25.00,
+            quantity: 50,
+          },
+        }],
+      }),
+    });
+
+    const response = await POST(request);
+    expect(response.status).toBe(200);
+
+    const body = await response.json();
+    expect(body.results[0].status).toBe("validation_error");
+    expect(body.results[0].message).toContain("Upgrade in Billing settings: /settings/billing");
+
+    const syncedProduct = await db.query.products.findFirst({
+      where: eq(products.id, operationId),
+    });
+    expect(syncedProduct).toBeUndefined();
+  });
+
   it("creates stock movement via sync with idempotency", async () => {
     vi.mocked(auth.api.getSession).mockResolvedValue(mockSession(userId, `test-${userId}@example.com`, tenantId));
 
