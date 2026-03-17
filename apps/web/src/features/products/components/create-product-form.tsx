@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm, useWatch } from "react-hook-form";
@@ -129,7 +130,8 @@ export function CreateProductForm({
       (customCriticalThreshold as number) > 0 &&
       (customAttentionThreshold as number) > 0 &&
       (customCriticalThreshold as number) < (customAttentionThreshold as number)
-    );
+     );
+  const showUpgradeCta = error?.includes("Upgrade in Billing settings") ?? false;
 
   const onSubmit = async (data: CreateProductFormData) => {
     setIsSubmitting(true);
@@ -193,7 +195,17 @@ export function CreateProductForm({
       )}
 
       {error && (
-        <div className="rounded-md bg-red-50 p-4 text-sm text-red-600">{error}</div>
+        <div className="rounded-md bg-red-50 p-4 text-sm text-red-600" role="alert">
+          <p>{error}</p>
+          {showUpgradeCta ? (
+            <Link
+              href="/settings/billing"
+              className="mt-2 inline-flex font-medium text-red-700 underline underline-offset-2"
+            >
+              Open Billing settings
+            </Link>
+          ) : null}
+        </div>
       )}
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">

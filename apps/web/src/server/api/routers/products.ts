@@ -27,6 +27,11 @@ import {
   resolveEffectiveThresholds,
   type CriticalAlertNotificationTask,
 } from "~/server/services/alert-service";
+import {
+  BILLING_UPGRADE_ROUTE,
+  checkProductLimit,
+  lockTenantSubscription,
+} from "~/server/services/subscription-service";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "~/server/db/schema";
 
@@ -364,6 +369,23 @@ export const productsRouter = createTRPCRouter({
       const pendingCriticalNotifications: CriticalAlertNotificationTask[] = [];
 
       const product = await ctx.db.transaction(async (tx) => {
+        await lockTenantSubscription({
+          db: tx,
+          tenantId,
+        });
+
+        const productLimitCheck = await checkProductLimit({
+          db: tx,
+          tenantId,
+        });
+
+        if (!productLimitCheck.allowed) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: `Product limit reached. Your ${productLimitCheck.plan} plan allows a maximum of ${productLimitCheck.limit} products. Upgrade in Billing settings: ${BILLING_UPGRADE_ROUTE}`,
+          });
+        }
+
         const [createdProduct] = await tx
           .insert(products)
           .values({

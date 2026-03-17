@@ -3,7 +3,7 @@
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { alerts, products } from "~/server/db/schema";
+import { alerts, products, tenants } from "~/server/db/schema";
 import {
   addUserToTenantWithRole,
   cleanTestDatabase,
@@ -206,5 +206,54 @@ describe("Products CRUD", () => {
     ).rejects.toMatchObject({
       code: "BAD_REQUEST",
     });
+  });
+
+  it("blocks product creation at the plan limit and allows it again after upgrade", async () => {
+    const admin = await createTestTenant();
+    const adminCtx = await createTenantContext(admin);
+
+    await testDb
+      .update(tenants)
+      .set({ subscriptionPlan: "Free" })
+      .where(eq(tenants.id, admin.tenantId));
+
+    await testDb.insert(products).values(
+      Array.from({ length: 20 }, (_, index) => ({
+        tenantId: admin.tenantId,
+        name: `Seed Product ${index + 1}`,
+        category: "Seeded",
+        unit: "pcs",
+        price: "1.00",
+        quantity: 1,
+      }))
+    );
+
+    await expect(
+      adminCtx.caller.products.create({
+        name: "Blocked Product",
+        category: "Seeded",
+        unit: "pcs",
+        price: 5,
+        quantity: 1,
+      })
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: expect.stringContaining("Upgrade in Billing settings: /settings/billing"),
+    });
+
+    await testDb
+      .update(tenants)
+      .set({ subscriptionPlan: "Starter" })
+      .where(eq(tenants.id, admin.tenantId));
+
+    const created = await adminCtx.caller.products.create({
+      name: "Allowed After Upgrade",
+      category: "Seeded",
+      unit: "pcs",
+      price: 5,
+      quantity: 1,
+    });
+
+    expect(created.name).toBe("Allowed After Upgrade");
   });
 });
