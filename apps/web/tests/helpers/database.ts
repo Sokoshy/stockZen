@@ -100,6 +100,7 @@ export async function cleanDatabase(db: ReturnType<typeof createTestDb>) {
     "session",
     "account",
     "verification",
+    "users",
     "user",
   ];
 
