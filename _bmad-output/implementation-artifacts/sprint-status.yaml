@@ -80,7 +80,7 @@ development_status:
 
   epic-6: in-progress
   6-1-view-current-subscription-plan-limits: done
-  6-2-enforce-plan-limits-products-users: backlog
+  6-2-enforce-plan-limits-products-users: done
   6-3-upgrade-downgrade-subscription-plan-via-stripe-checkout: backlog
   6-4-access-billing-portal-for-invoices-payment-methods: backlog
   epic-6-retrospective: optional
