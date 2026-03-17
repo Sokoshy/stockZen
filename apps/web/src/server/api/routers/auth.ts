@@ -70,6 +70,11 @@ import {
 import { logger } from "~/server/logger";
 import { getClientIp, rateLimit } from "~/server/rate-limit";
 import { createAuditEvent } from "~/server/services/audit-service";
+import {
+  BILLING_UPGRADE_ROUTE,
+  checkUserLimit,
+  lockTenantSubscription,
+} from "~/server/services/subscription-service";
 
 const DEFAULT_SESSION_TTL_SECONDS = 60 * 30;
 const REMEMBER_ME_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
@@ -1413,58 +1418,6 @@ export const authRouter = createTRPCRouter({
 
       const normalizedEmail = input.email.trim().toLowerCase();
 
-      // Check if user is already a member
-      const existingMembership = await ctx.db
-        .select({ userId: tenantMemberships.userId })
-        .from(tenantMemberships)
-        .innerJoin(user, eq(tenantMemberships.userId, user.id))
-        .where(
-          and(
-            eq(tenantMemberships.tenantId, tenantId),
-            sql`lower(${user.email}) = ${normalizedEmail}`
-          )
-        )
-        .limit(1);
-
-      if (existingMembership.length > 0) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "This user is already a member of the tenant.",
-        });
-      }
-
-      // Revoke expired pending invitations for the same email so they no longer
-      // block a fresh invite.
-      await ctx.db
-        .update(tenantInvitations)
-        .set({ revokedAt: new Date() })
-        .where(
-          and(
-            eq(tenantInvitations.tenantId, tenantId),
-            sql`lower(${tenantInvitations.email}) = ${normalizedEmail}`,
-            isNull(tenantInvitations.revokedAt),
-            isNull(tenantInvitations.usedAt),
-            lt(tenantInvitations.expiresAt, new Date())
-          )
-        );
-
-      // Check for existing pending invitation
-      const existingInvitation = await ctx.db.query.tenantInvitations.findFirst({
-        where: and(
-          eq(tenantInvitations.tenantId, tenantId),
-          sql`lower(${tenantInvitations.email}) = ${normalizedEmail}`,
-          isNull(tenantInvitations.revokedAt),
-          isNull(tenantInvitations.usedAt)
-        ),
-      });
-
-      if (existingInvitation) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "An active invitation already exists for this email.",
-        });
-      }
-
       // Generate secure random token
       const token = crypto.randomUUID();
       const tokenHash = await hashToken(token);
@@ -1475,17 +1428,86 @@ export const authRouter = createTRPCRouter({
 
       let invitation: typeof tenantInvitations.$inferSelect | undefined;
       try {
-        [invitation] = await ctx.db
-          .insert(tenantInvitations)
-          .values({
+        [invitation] = await ctx.db.transaction(async (tx) => {
+          await lockTenantSubscription({
+            db: tx,
             tenantId,
-            email: normalizedEmail,
-            role: input.role,
-            tokenHash,
-            expiresAt,
-            invitedByUserId: ctx.session.user.id,
-          })
-          .returning();
+          });
+
+          const userLimitCheck = await checkUserLimit({
+            db: tx,
+            tenantId,
+          });
+
+          if (!userLimitCheck.allowed) {
+            throw new TRPCError({
+              code: "FORBIDDEN",
+              message: `User limit reached. Your ${userLimitCheck.plan} plan allows a maximum of ${userLimitCheck.limit} users. Upgrade in Billing settings: ${BILLING_UPGRADE_ROUTE}`,
+            });
+          }
+
+          const existingMembership = await tx
+            .select({ userId: tenantMemberships.userId })
+            .from(tenantMemberships)
+            .innerJoin(user, eq(tenantMemberships.userId, user.id))
+            .where(
+              and(
+                eq(tenantMemberships.tenantId, tenantId),
+                sql`lower(${user.email}) = ${normalizedEmail}`
+              )
+            )
+            .limit(1);
+
+          if (existingMembership.length > 0) {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "This user is already a member of the tenant.",
+            });
+          }
+
+          await tx
+            .update(tenantInvitations)
+            .set({ revokedAt: new Date() })
+            .where(
+              and(
+                eq(tenantInvitations.tenantId, tenantId),
+                sql`lower(${tenantInvitations.email}) = ${normalizedEmail}`,
+                isNull(tenantInvitations.revokedAt),
+                isNull(tenantInvitations.usedAt),
+                lt(tenantInvitations.expiresAt, new Date())
+              )
+            );
+
+          const existingInvitation = await tx.query.tenantInvitations.findFirst({
+            where: and(
+              eq(tenantInvitations.tenantId, tenantId),
+              sql`lower(${tenantInvitations.email}) = ${normalizedEmail}`,
+              isNull(tenantInvitations.revokedAt),
+              isNull(tenantInvitations.usedAt)
+            ),
+          });
+
+          if (existingInvitation) {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "An active invitation already exists for this email.",
+            });
+          }
+
+          const inserted = await tx
+            .insert(tenantInvitations)
+            .values({
+              tenantId,
+              email: normalizedEmail,
+              role: input.role,
+              tokenHash,
+              expiresAt,
+              invitedByUserId: ctx.session.user.id,
+            })
+            .returning();
+
+          return inserted;
+        });
       } catch (error) {
         if (isUniqueConstraintViolation(error)) {
           throw new TRPCError({

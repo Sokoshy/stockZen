@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 import { api } from "~/trpc/react";
@@ -26,6 +27,7 @@ export function InviteUserForm() {
       setFormError(error.message);
     },
   });
+  const showUpgradeCta = formError?.includes("Upgrade in Billing settings") ?? false;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,6 +47,14 @@ export function InviteUserForm() {
       {formError ? (
         <div className="rounded-md bg-red-50 p-3" role="alert">
           <p className="text-sm font-medium text-red-800">{formError}</p>
+          {showUpgradeCta ? (
+            <Link
+              href="/settings/billing"
+              className="mt-2 inline-flex text-sm font-medium text-red-900 underline underline-offset-2"
+            >
+              Open Billing settings
+            </Link>
+          ) : null}
         </div>
       ) : null}
 

@@ -5,7 +5,7 @@ import { and, eq } from "drizzle-orm";
 
 import { createCaller } from "~/server/api/root";
 import { createTRPCContext } from "~/server/api/trpc";
-import { tenantInvitations, tenantMemberships, user } from "~/server/db/schema";
+import { tenantInvitations, tenantMemberships, tenants, user } from "~/server/db/schema";
 import {
   cleanDatabase,
   createTestDb,
@@ -303,6 +303,57 @@ describe("Auth invitations", () => {
           role: "Manager",
         })
       ).rejects.toThrow(/already a member/i);
+    });
+
+    it("counts pending invitations against user limits", async () => {
+      const admin = await signUpUser("Admin");
+      const { caller } = await createProtectedCaller(admin.cookie, nextIp());
+
+      await testDb
+        .update(tenants)
+        .set({ subscriptionPlan: "Starter" })
+        .where(eq(tenants.id, admin.tenantId));
+
+      await createInvitationWithKnownToken(caller, {
+        email: generateTestEmail(),
+        role: "Manager",
+      });
+
+      await expect(
+        createInvitationWithKnownToken(caller, {
+          email: generateTestEmail(),
+          role: "Operator",
+        })
+      ).rejects.toThrow(/Upgrade in Billing settings: \/settings\/billing/i);
+    });
+
+    it("allows invitation creation again after upgrading the plan", async () => {
+      const admin = await signUpUser("Admin");
+      const { caller } = await createProtectedCaller(admin.cookie, nextIp());
+
+      await testDb
+        .update(tenants)
+        .set({ subscriptionPlan: "Free" })
+        .where(eq(tenants.id, admin.tenantId));
+
+      await expect(
+        createInvitationWithKnownToken(caller, {
+          email: generateTestEmail(),
+          role: "Manager",
+        })
+      ).rejects.toThrow(/Upgrade in Billing settings: \/settings\/billing/i);
+
+      await testDb
+        .update(tenants)
+        .set({ subscriptionPlan: "Starter" })
+        .where(eq(tenants.id, admin.tenantId));
+
+      const { result } = await createInvitationWithKnownToken(caller, {
+        email: generateTestEmail(),
+        role: "Manager",
+      });
+
+      expect(result.success).toBe(true);
     });
   });
 
