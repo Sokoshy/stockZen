@@ -1,0 +1,46 @@
+index:
+  provider: sqlite
+  db_path: .docmancer/docmancer.db
+  extracted_dir: .docmancer/extracted
+query:
+  default_budget: 2400
+  default_limit: 8
+  default_expand: adjacent
+web_fetch:
+  workers: 8
+  default_page_cap: 500
+  browser_fallback: false
+loaders:
+  default_chunk_size: 800
+  default_chunk_overlap: 100
+  formats: {}
+vector_store:
+  provider: qdrant
+  url: null
+  api_key_env: null
+  collection: null
+  options: {}
+embeddings:
+  provider: fastembed
+  model: BAAI/bge-base-en-v1.5
+  dimensions: 768
+  sparse_model: null
+  cache: /home/sokoslay/.docmancer/embeddings-cache
+  batch_size: 64
+retrieval:
+  default_mode: lexical
+  fusion:
+    method: rrf
+    rrf_k: 60
+    weights: {}
+  hierarchical:
+    enabled: false
+    auto: true
+    auto_min_documents: 10
+    documents_limit: 5
+    candidate_pool: 200
+    sections_per_document: 10
+  routers: []
+  expand: null
+  budget: null
+  limit: null

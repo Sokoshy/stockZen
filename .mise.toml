@@ -1,0 +1,55 @@
+[tools]
+node = "22"
+aube = "latest"
+pnpm = "latest"
+
+[tasks.dev]
+description = "Lancer le serveur de dev"
+run = "cd apps/web && aubr dev"
+alias = "d"
+
+[tasks.build]
+description = "Build production"
+run = "cd apps/web && aubr build"
+alias = "b"
+
+[tasks.typecheck]
+description = "Vérifier les types"
+run = "cd apps/web && aubr typecheck"
+alias = "t"
+
+[tasks.test]
+description = "Run unit + integration tests"
+run = "cd apps/web && aubr test:run"
+
+[tasks.test-watch]
+description = "Tests en watch mode"
+run = "cd apps/web && aubr test"
+
+[tasks.test-e2e]
+description = "Run Playwright E2E tests"
+run = "cd apps/web && aubr test:e2e"
+
+[tasks.db-generate]
+description = "Générer les migrations Drizzle"
+run = "cd apps/web && aubr db:generate"
+
+[tasks.db-migrate]
+description = "Appliquer les migrations"
+run = "cd apps/web && aubr db:migrate"
+
+[tasks.db-push]
+description = "Push schema (dev only)"
+run = "cd apps/web && aubr db:push"
+
+[tasks.db-studio]
+description = "Ouvrir Drizzle Studio"
+run = "cd apps/web && aubr db:studio"
+
+[tasks.preview]
+description = "Preview production build"
+run = "cd apps/web && aubr preview"
+
+[tasks.lint]
+description = "Typecheck + tests"
+depends = ["typecheck", "test"]

@@ -67,5 +67,11 @@
   },
   "trustedDependencies": [
     "@seontechnologies/playwright-utils"
-  ]
+  ],
+  "aube": {
+    "allowBuilds": {
+      "esbuild": true,
+      "sharp": true
+    }
+  }
 }
