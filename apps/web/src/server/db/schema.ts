@@ -5,7 +5,6 @@ import {
   integer,
   numeric,
   pgTable,
-  pgTableCreator,
   text,
   timestamp,
   uuid,
@@ -13,8 +12,6 @@ import {
   pgEnum,
   check,
 } from "drizzle-orm/pg-core";
-
-export const createTable = pgTableCreator((name) => `pg-drizzle_${name}`);
 
 // ============================================
 // Better Auth Tables (managed by Better Auth)
@@ -323,31 +320,6 @@ export const stockMovements = pgTable(
     index("idx_stock_movements_tenant_product").on(table.tenantId, table.productId),
     index("idx_stock_movements_created_at").on(table.createdAt),
     index("idx_stock_movements_idempotency").on(table.tenantId, table.idempotencyKey),
-  ]
-);
-
-// ============================================
-// Example/Demo Table (can be removed later)
-// ============================================
-
-export const posts = createTable(
-  "post",
-  (d) => ({
-    id: d.integer().primaryKey().generatedByDefaultAsIdentity(),
-    name: d.varchar({ length: 256 }),
-    createdById: d
-      .varchar({ length: 255 })
-      .notNull()
-      .references(() => user.id),
-    createdAt: d
-      .timestamp({ withTimezone: true })
-      .$defaultFn(() => new Date())
-      .notNull(),
-    updatedAt: d.timestamp({ withTimezone: true }).$onUpdate(() => new Date()),
-  }),
-  (t) => [
-    index("created_by_idx").on(t.createdById),
-    index("name_idx").on(t.name),
   ]
 );
 
