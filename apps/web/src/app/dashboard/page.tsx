@@ -44,9 +44,6 @@ export default async function DashboardPage() {
               Manage team members
             </Link>
           </div>
-          <div className="mt-6">
-            <p className="text-sm text-gray-500">User ID: {session.user.id}</p>
-          </div>
         </div>
       </main>
     </div>

@@ -1,7 +1,6 @@
 [tools]
 node = "22"
 aube = "latest"
-pnpm = "latest"
 
 [tasks.dev]
 description = "Lancer le serveur de dev"

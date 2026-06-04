@@ -241,6 +241,10 @@ async function queueOrDispatchCriticalAlertNotification(
 export async function updateAlertLifecycle(
   input: UpdateAlertLifecycleInput
 ): Promise<void> {
+  if (process.env.SKIP_ALERT_RECOMPUTATION === "true") {
+    return;
+  }
+
   const {
     db,
     tenantId,
@@ -548,6 +552,10 @@ export async function recomputeAlertsForProducts(
   productIds: string[],
   pendingCriticalNotifications?: CriticalAlertNotificationTask[]
 ): Promise<void> {
+  if (process.env.SKIP_ALERT_RECOMPUTATION === "true") {
+    return;
+  }
+
   if (productIds.length === 0) {
     return;
   }

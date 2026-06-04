@@ -200,6 +200,8 @@ async function ensureAlertsTable(target: ReturnType<typeof postgres>): Promise<v
       status alert_status NOT NULL DEFAULT 'active',
       stock_at_creation integer NOT NULL,
       current_stock integer NOT NULL,
+      handled_at timestamp with time zone,
+      snoozed_until timestamp with time zone,
       created_at timestamp with time zone DEFAULT now() NOT NULL,
       updated_at timestamp with time zone DEFAULT now() NOT NULL,
       closed_at timestamp with time zone
@@ -209,6 +211,151 @@ async function ensureAlertsTable(target: ReturnType<typeof postgres>): Promise<v
     CREATE INDEX idx_alerts_tenant_status_level ON alerts (tenant_id, status, level);
     CREATE INDEX idx_alerts_tenant_updated ON alerts (tenant_id, updated_at DESC);
     CREATE INDEX idx_alerts_product_id ON alerts (product_id);
+  `);
+}
+
+async function ensureStockzenAppRole(target: ReturnType<typeof postgres>): Promise<void> {
+  await target.unsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'stockzen_app') THEN
+        CREATE ROLE stockzen_app WITH LOGIN PASSWORD 'stockzen_app_password' NOSUPERUSER NOBYPASSRLS;
+      END IF;
+    END
+    $$;
+    ALTER ROLE stockzen_app SET search_path TO public;
+    GRANT USAGE ON SCHEMA public TO stockzen_app;
+  `);
+
+  await target.unsafe(`
+    DO $$
+    DECLARE
+      tbl RECORD;
+    BEGIN
+      FOR tbl IN
+        SELECT tablename FROM pg_tables
+        WHERE schemaname = 'public'
+          AND tablename IN ('tenants', 'tenant_memberships', 'tenant_invitations', 'products', 'stock_movements', 'alerts', 'audit_events', 'users', 'session', 'account', 'verification')
+      LOOP
+        EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE %I TO stockzen_app', tbl.tablename);
+      END LOOP;
+    END
+    $$;
+  `);
+
+  await target.unsafe(`
+    DO $$
+    DECLARE
+      seq RECORD;
+    BEGIN
+      FOR seq IN
+        SELECT sequence_name FROM information_schema.sequences
+        WHERE sequence_schema = 'public'
+      LOOP
+        EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %I TO stockzen_app', seq.sequence_name);
+      END LOOP;
+    END
+    $$;
+  `);
+}
+
+async function ensureForceRls(target: ReturnType<typeof postgres>): Promise<void> {
+  const tenantScopedTables = [
+    "tenants",
+    "tenant_memberships",
+    "tenant_invitations",
+    "products",
+    "stock_movements",
+    "alerts",
+    "audit_events",
+  ];
+
+  for (const tableName of tenantScopedTables) {
+    const tableExists = await target<{ exists: boolean }[]>`
+      SELECT EXISTS (
+        SELECT 1
+        FROM pg_class
+        WHERE relname = ${tableName}
+          AND relkind = 'r'
+      ) AS exists
+    `;
+
+    if (tableExists[0]?.exists) {
+      await target.unsafe(`ALTER TABLE "${tableName}" FORCE ROW LEVEL SECURITY`);
+    }
+  }
+}
+
+async function ensureAlertsRls(target: ReturnType<typeof postgres>): Promise<void> {
+  const alertsTableExists = await target<{ exists: boolean }[]>`
+    SELECT EXISTS (
+      SELECT 1
+      FROM pg_class
+      WHERE relname = 'alerts'
+        AND relkind = 'r'
+    ) AS exists
+  `;
+
+  if (!alertsTableExists[0]?.exists) {
+    return;
+  }
+
+  await target.unsafe(`ALTER TABLE alerts ENABLE ROW LEVEL SECURITY`);
+
+  await target.unsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'alerts_tenant_isolation_select' AND polrelid = 'alerts'::regclass) THEN
+        CREATE POLICY alerts_tenant_isolation_select ON alerts FOR SELECT USING (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'alerts_tenant_isolation_insert' AND polrelid = 'alerts'::regclass) THEN
+        CREATE POLICY alerts_tenant_isolation_insert ON alerts FOR INSERT WITH CHECK (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'alerts_tenant_isolation_update' AND polrelid = 'alerts'::regclass) THEN
+        CREATE POLICY alerts_tenant_isolation_update ON alerts FOR UPDATE USING (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'alerts_tenant_isolation_delete' AND polrelid = 'alerts'::regclass) THEN
+        CREATE POLICY alerts_tenant_isolation_delete ON alerts FOR DELETE USING (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+      END IF;
+    END
+    $$;
+  `);
+}
+
+async function ensureTightenedInsertPolicies(target: ReturnType<typeof postgres>): Promise<void> {
+  await target.unsafe(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'tenant_memberships' AND policyname = 'membership_isolation_insert'
+      ) THEN
+        DROP POLICY "membership_isolation_insert" ON "tenant_memberships";
+      END IF;
+      CREATE POLICY "membership_isolation_insert" ON "tenant_memberships"
+        FOR INSERT WITH CHECK (
+          tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid
+        );
+    END
+    $$;
+
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'audit_events' AND policyname = 'audit_events_allow_insert'
+      ) THEN
+        DROP POLICY "audit_events_allow_insert" ON "audit_events";
+      END IF;
+      IF EXISTS (
+        SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'audit_events' AND policyname = 'audit_events_tenant_isolation_insert'
+      ) THEN
+        DROP POLICY "audit_events_tenant_isolation_insert" ON "audit_events";
+      END IF;
+      CREATE POLICY "audit_events_tenant_isolation_insert" ON "audit_events"
+        FOR INSERT WITH CHECK (
+          tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid
+        );
+    END
+    $$;
   `);
 }
 
@@ -308,6 +455,10 @@ export async function ensureTestDatabaseReady(): Promise<void> {
       await ensureTenantThresholdColumns(target);
       await ensureProductCustomThresholdColumns(target);
       await ensureAlertsTable(target);
+      await ensureStockzenAppRole(target);
+      await ensureForceRls(target);
+      await ensureAlertsRls(target);
+      await ensureTightenedInsertPolicies(target);
       return;
     }
 
@@ -327,7 +478,13 @@ export async function ensureTestDatabaseReady(): Promise<void> {
     await ensureTenantThresholdColumns(target);
     await ensureProductCustomThresholdColumns(target);
     await ensureAlertsTable(target);
-  } catch {
+    await ensureStockzenAppRole(target);
+    await ensureForceRls(target);
+    await ensureAlertsRls(target);
+    await ensureTightenedInsertPolicies(target);
+  } catch (error) {
+    console.error("Failed to ensure test database is ready:", error);
+    throw error;
   } finally {
     await target.end({ timeout: 5 });
   }

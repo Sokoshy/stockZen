@@ -10,13 +10,15 @@ const TEST_DATABASE_URL =
 
 // Create a test database client
 export function createTestDb() {
-  const client = postgres(TEST_DATABASE_URL);
+  const client = postgres(TEST_DATABASE_URL, { max: 1 });
   return drizzle(client, { schema });
 }
 
 // Clean up tables before/after tests
 export async function cleanDatabase(db: ReturnType<typeof createTestDb>) {
   const client = await db.$client;
+
+  await client.unsafe(`ROLLBACK`).catch(() => {});
 
   await client.unsafe(`
     DO $$
@@ -93,6 +95,7 @@ export async function cleanDatabase(db: ReturnType<typeof createTestDb>) {
   const tablesInDeleteOrder = [
     "alerts",
     "audit_events",
+    "stock_movements",
     "products",
     "tenant_invitations",
     "tenant_memberships",
