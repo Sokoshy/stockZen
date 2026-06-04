@@ -1,3 +1,4 @@
+-- IMPORTANT: Change stockzen_app_password before deploying to production
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'stockzen_app') THEN

@@ -105,7 +105,6 @@ export async function cleanDatabase(db: ReturnType<typeof createTestDb>) {
     "verification",
     "users",
     "user",
-    "pg-drizzle_post",
   ];
 
   // Delete in order to respect foreign key constraints.

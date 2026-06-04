@@ -200,6 +200,8 @@ async function ensureAlertsTable(target: ReturnType<typeof postgres>): Promise<v
       status alert_status NOT NULL DEFAULT 'active',
       stock_at_creation integer NOT NULL,
       current_stock integer NOT NULL,
+      handled_at timestamp with time zone,
+      snoozed_until timestamp with time zone,
       created_at timestamp with time zone DEFAULT now() NOT NULL,
       updated_at timestamp with time zone DEFAULT now() NOT NULL,
       closed_at timestamp with time zone
@@ -233,6 +235,7 @@ async function ensureStockzenAppRole(target: ReturnType<typeof postgres>): Promi
       FOR tbl IN
         SELECT tablename FROM pg_tables
         WHERE schemaname = 'public'
+          AND tablename IN ('tenants', 'tenant_memberships', 'tenant_invitations', 'products', 'stock_movements', 'alerts', 'audit_events', 'users', 'session', 'account', 'verification')
       LOOP
         EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE %I TO stockzen_app', tbl.tablename);
       END LOOP;
@@ -314,6 +317,43 @@ async function ensureAlertsRls(target: ReturnType<typeof postgres>): Promise<voi
       IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'alerts_tenant_isolation_delete' AND polrelid = 'alerts'::regclass) THEN
         CREATE POLICY alerts_tenant_isolation_delete ON alerts FOR DELETE USING (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
       END IF;
+    END
+    $$;
+  `);
+}
+
+async function ensureTightenedInsertPolicies(target: ReturnType<typeof postgres>): Promise<void> {
+  await target.unsafe(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'tenant_memberships' AND policyname = 'membership_isolation_insert'
+      ) THEN
+        DROP POLICY "membership_isolation_insert" ON "tenant_memberships";
+      END IF;
+      CREATE POLICY "membership_isolation_insert" ON "tenant_memberships"
+        FOR INSERT WITH CHECK (
+          tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid
+        );
+    END
+    $$;
+
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'audit_events' AND policyname = 'audit_events_allow_insert'
+      ) THEN
+        DROP POLICY "audit_events_allow_insert" ON "audit_events";
+      END IF;
+      IF EXISTS (
+        SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'audit_events' AND policyname = 'audit_events_tenant_isolation_insert'
+      ) THEN
+        DROP POLICY "audit_events_tenant_isolation_insert" ON "audit_events";
+      END IF;
+      CREATE POLICY "audit_events_tenant_isolation_insert" ON "audit_events"
+        FOR INSERT WITH CHECK (
+          tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid
+        );
     END
     $$;
   `);
@@ -418,6 +458,7 @@ export async function ensureTestDatabaseReady(): Promise<void> {
       await ensureStockzenAppRole(target);
       await ensureForceRls(target);
       await ensureAlertsRls(target);
+      await ensureTightenedInsertPolicies(target);
       return;
     }
 
@@ -440,7 +481,10 @@ export async function ensureTestDatabaseReady(): Promise<void> {
     await ensureStockzenAppRole(target);
     await ensureForceRls(target);
     await ensureAlertsRls(target);
-  } catch {
+    await ensureTightenedInsertPolicies(target);
+  } catch (error) {
+    console.error("Failed to ensure test database is ready:", error);
+    throw error;
   } finally {
     await target.end({ timeout: 5 });
   }

@@ -51,10 +51,13 @@ export async function setInvitationTokenContext(
 }
 
 /**
- * Clear the tenant context
- * Use this when you need to bypass RLS (e.g., for admin operations)
+ * Clear the tenant context.
+ *
+ * Module-private — do NOT export. Reserved for internal administrative
+ * operations (migrations, background jobs) that legitimately need
+ * cross-tenant access. Prefer a separate superuser connection instead.
  */
-export async function clearTenantContext(client: DbClient = db): Promise<void> {
+async function clearTenantContext(client: DbClient = db): Promise<void> {
   await client.execute(sql`SELECT set_config('app.tenant_id', '', true)`);
   await client.execute(sql`SELECT set_config('row_security', 'off', true)`);
 }

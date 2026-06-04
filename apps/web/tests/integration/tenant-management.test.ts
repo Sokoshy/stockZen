@@ -5,7 +5,6 @@ import { eq, sql } from "drizzle-orm";
 
 import { tenants, tenantMemberships, user } from "~/server/db/schema";
 import {
-  clearTenantContext,
   getTenantContext,
   setTenantContext,
   withTenantContext,
@@ -101,11 +100,6 @@ describe("Tenant Management", () => {
 
       // In a connection pool, this might not persist, but we're testing the function works
       expect(context).toBeDefined();
-    });
-
-    it("should clear tenant context without error", async () => {
-      // Should execute without throwing
-      await expect(clearTenantContext()).resolves.not.toThrow();
     });
 
     it("should handle null tenant context", async () => {
