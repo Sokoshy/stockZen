@@ -40,12 +40,20 @@ export interface OutboxOperation {
   operationType: "create" | "update" | "delete";
   entityType: "product" | "stockMovement";
   entityId: string;
+  tenantId: string;
   payload: Record<string, unknown>;
   status: "pending" | "processing" | "completed" | "failed" | "permanently_failed";
   retryCount: number;
   createdAt: string;
   processedAt: string | null;
   error: string | null;
+  /**
+   * Transient flag: when true, the sync engine treats a final failure as
+   * "abandoned" and cleans up the local entity instead of leaving the row
+   * in permanently_failed. Set by retryPermanentlyFailedOperation and
+   * cleared by the sync engine after the next attempt.
+   */
+  oneShotRetry?: boolean;
 }
 
 const db = new Dexie("StockZenDB") as Dexie & {
@@ -86,6 +94,35 @@ db.version(5).stores({
   outbox:
     "id, operationId, entityType, entityId, status, createdAt, [entityType+entityId], [entityType+operationId]",
 });
+
+/**
+ * Promote tenantId to a first-class column on the outbox so we can build
+ * indexed composite queries ([tenantId+status]) instead of scanning the
+ * whole table and filtering in JS. Also adds the same composite for
+ * permanently_failed to power the retry UI efficiently.
+ */
+db.version(6)
+  .stores({
+    products: "id, tenantId, syncStatus, category, barcode, [tenantId+syncStatus], deletedAt",
+    stockMovements:
+      "id, tenantId, productId, syncStatus, clientCreatedAt, [tenantId+syncStatus], [productId+clientCreatedAt]",
+    outbox:
+      "id, operationId, entityType, entityId, status, createdAt, tenantId, [entityType+entityId], [entityType+operationId], [tenantId+status]",
+  })
+  .upgrade(async (tx) => {
+    // Backfill tenantId from payload for any rows created before v6.
+    await tx
+      .table("outbox")
+      .toCollection()
+      .modify((row) => {
+        if (!row.tenantId) {
+          const payloadTenantId = (row.payload as { tenantId?: unknown })?.tenantId;
+          if (typeof payloadTenantId === "string") {
+            row.tenantId = payloadTenantId;
+          }
+        }
+      });
+  });
 
 export { db };
 

@@ -4,10 +4,15 @@ import { useEffect, useState, useCallback } from "react";
 import {
   acquireSyncEngine,
   releaseSyncEngine,
+  getPermanentlyFailedOperations,
+  retryPermanentlyFailedOperation,
+  dismissPermanentlyFailedOperation,
+  type OutboxOperation,
   type SyncEngineState,
   type SyncState,
   type SyncEngine,
   type SyncEngineConfig,
+  type RetryPermanentlyFailedResult,
 } from "~/features/offline/sync-pipeline";
 
 export interface UseSyncStatusOptions {
@@ -20,6 +25,8 @@ export interface UseSyncStatusReturn {
   state: SyncState;
   pendingCount: number;
   failedCount: number;
+  permanentlyFailedCount: number;
+  permanentlyFailedOps: OutboxOperation[];
   lastSyncAt: string | null;
   lastError: string | null;
   isSyncing: boolean;
@@ -29,6 +36,9 @@ export interface UseSyncStatusReturn {
   sync: () => Promise<void>;
   statusText: string;
   statusIcon: "sync" | "check" | "cloud-off" | "alert-circle";
+  retryFailed: (operationId: string) => Promise<RetryPermanentlyFailedResult>;
+  dismissFailed: (operationId: string) => Promise<void>;
+  refreshPermanentlyFailed: () => Promise<void>;
 }
 
 export function useSyncStatus(options: UseSyncStatusOptions): UseSyncStatusReturn {
@@ -42,6 +52,18 @@ export function useSyncStatus(options: UseSyncStatusOptions): UseSyncStatusRetur
     lastSyncAt: null,
     lastError: null,
   });
+  const [permanentlyFailedOps, setPermanentlyFailedOps] = useState<
+    OutboxOperation[]
+  >([]);
+
+  const refreshPermanentlyFailed = useCallback(async () => {
+    try {
+      const rows = await getPermanentlyFailedOperations(tenantId);
+      setPermanentlyFailedOps(rows);
+    } catch {
+      setPermanentlyFailedOps([]);
+    }
+  }, [tenantId]);
 
   useEffect(() => {
     const config: SyncEngineConfig = {
@@ -52,7 +74,9 @@ export function useSyncStatus(options: UseSyncStatusOptions): UseSyncStatusRetur
     const syncEngine = acquireSyncEngine(config);
     setEngine(syncEngine);
 
-    const unsubscribe = syncEngine.subscribe(setSyncState);
+    const unsubscribe = syncEngine.subscribe((state) => {
+      setSyncState(state);
+    });
 
     if (autoStart) {
       void syncEngine.start();
@@ -64,11 +88,43 @@ export function useSyncStatus(options: UseSyncStatusOptions): UseSyncStatusRetur
     };
   }, [tenantId, autoStart, syncIntervalMs]);
 
+  // Refresh the permanently-failed list whenever the sync state changes
+  // (state, pendingCount, failedCount, lastSyncAt) — i.e. after every
+  // sync attempt that the engine reports. This is cheap because the
+  // list is indexed.
+  useEffect(() => {
+    void refreshPermanentlyFailed();
+  }, [
+    refreshPermanentlyFailed,
+    syncState.state,
+    syncState.pendingCount,
+    syncState.failedCount,
+    syncState.lastSyncAt,
+  ]);
+
   const sync = useCallback(async () => {
     if (engine) {
       await engine.sync();
     }
-  }, [engine]);
+    await refreshPermanentlyFailed();
+  }, [engine, refreshPermanentlyFailed]);
+
+  const retryFailed = useCallback(
+    async (operationId: string): Promise<RetryPermanentlyFailedResult> => {
+      const result = await retryPermanentlyFailedOperation(operationId);
+      await refreshPermanentlyFailed();
+      return result;
+    },
+    [refreshPermanentlyFailed]
+  );
+
+  const dismissFailed = useCallback(
+    async (operationId: string): Promise<void> => {
+      await dismissPermanentlyFailedOperation(operationId);
+      await refreshPermanentlyFailed();
+    },
+    [refreshPermanentlyFailed]
+  );
 
   const isSyncing = syncState.state === "syncing";
   const isOffline = syncState.state === "offline";
@@ -111,6 +167,8 @@ export function useSyncStatus(options: UseSyncStatusOptions): UseSyncStatusRetur
     state: syncState.state,
     pendingCount: syncState.pendingCount,
     failedCount: syncState.failedCount,
+    permanentlyFailedCount: permanentlyFailedOps.length,
+    permanentlyFailedOps,
     lastSyncAt: syncState.lastSyncAt,
     lastError: syncState.lastError,
     isSyncing,
@@ -120,5 +178,8 @@ export function useSyncStatus(options: UseSyncStatusOptions): UseSyncStatusRetur
     sync,
     statusText: getStatusText(),
     statusIcon: getStatusIcon(),
+    retryFailed,
+    dismissFailed,
+    refreshPermanentlyFailed,
   };
 }

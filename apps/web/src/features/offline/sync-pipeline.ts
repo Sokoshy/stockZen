@@ -11,6 +11,7 @@ export interface EnqueueOperationInput {
   operationType: "create" | "update" | "delete";
   entityType: "product" | "stockMovement";
   entityId: string;
+  tenantId: string;
   payload: Record<string, unknown>;
 }
 
@@ -123,8 +124,10 @@ export async function enqueueOperation(input: EnqueueOperationInput): Promise<st
     operationType: input.operationType,
     entityType: input.entityType,
     entityId: input.entityId,
+    tenantId: input.tenantId,
     payload: {
       ...input.payload,
+      tenantId: input.tenantId,
       operationId,
     },
     status: "pending",
@@ -146,6 +149,10 @@ export async function getPendingOperations(): Promise<OutboxOperation[]> {
 /**
  * Atomically claim pending operations by marking them as "processing" in a
  * single Dexie transaction. This prevents multi-tab double-processing.
+ *
+ * Uses the indexed [tenantId+status] composite for an efficient query path
+ * when both fields are present, and falls back to a full table scan for
+ * legacy rows missing tenantId (pre-v6 schema).
  */
 export async function claimPendingOperations(
   tenantId: string,
@@ -155,14 +162,38 @@ export async function claimPendingOperations(
 ): Promise<OutboxOperation[]> {
   return db.transaction("rw", db.outbox, async () => {
     const now = Date.now();
-    const allOps = await db.outbox.toArray();
 
-    const claimable = allOps.filter((op) => {
+    // Prefer the indexed composite query. When rows for this tenant exist
+    // with a tenantId column we can hit the [tenantId+status] index; we
+    // still need to merge legacy rows that lack a top-level tenantId
+    // (their payload-level tenantId is the source of truth until v6
+    // backfill runs).
+    const indexedPending = await db.outbox
+      .where("[tenantId+status]")
+      .equals([tenantId, "pending"])
+      .toArray();
+    const indexedFailed = await db.outbox
+      .where("[tenantId+status]")
+      .equals([tenantId, "failed"])
+      .toArray();
+
+    const legacyAll = await db.outbox.toArray();
+    const legacyRows = legacyAll.filter(
+      (op) => !op.tenantId && (op.payload as { tenantId?: string }).tenantId === tenantId
+    );
+
+    const candidates: OutboxOperation[] = [
+      ...indexedPending,
+      ...indexedFailed,
+      ...legacyRows,
+    ];
+
+    const claimable = candidates.filter((op) => {
       if (op.status !== "pending" && op.status !== "failed") {
         return false;
       }
 
-      const opTenantId = (op.payload as { tenantId?: string }).tenantId;
+      const opTenantId = op.tenantId ?? (op.payload as { tenantId?: string }).tenantId;
       if (opTenantId !== tenantId) {
         return false;
       }
@@ -207,43 +238,58 @@ export async function markOperationProcessing(operationId: string): Promise<void
 }
 
 /**
- * Single-atomic-UPDATE completion: status + processedAt + optional serverId
- * payload update in one call instead of two separate writes.
+ * Mark an operation as completed in a single Dexie transaction. When a
+ * server-side id is provided it is merged into the payload so the next
+ * observer can use it.
+ *
+ * When serverSyncedId is provided: one read + one write inside a single transaction.
+ * When absent: a single write (no read).
+ *
+ * The `oneShotRetry` transient flag is explicitly cleared (set to
+ * `undefined`) so Dexie's `update` removes the key — a successful
+ * retry must not keep the flag around for the next attempt.
  */
 export async function markOperationCompleted(
   operationId: string,
   serverSyncedId?: string
 ): Promise<void> {
-  if (serverSyncedId) {
-    const existing = await db.outbox.get(operationId);
-    await db.outbox.update(operationId, {
-      status: "completed",
-      processedAt: new Date().toISOString(),
-      payload: { ...(existing?.payload ?? {}), serverId: serverSyncedId },
-    });
-  } else {
-    await db.outbox.update(operationId, {
-      status: "completed",
-      processedAt: new Date().toISOString(),
-    });
-  }
+  await db.transaction("rw", db.outbox, async () => {
+    if (serverSyncedId) {
+      const existing = await db.outbox.get(operationId);
+      await db.outbox.update(operationId, {
+        status: "completed",
+        processedAt: new Date().toISOString(),
+        oneShotRetry: undefined,
+        payload: { ...(existing?.payload ?? {}), serverId: serverSyncedId },
+      });
+    } else {
+      await db.outbox.update(operationId, {
+        status: "completed",
+        processedAt: new Date().toISOString(),
+        oneShotRetry: undefined,
+      });
+    }
+  });
 }
 
 /**
- * Mark operation as failed. When retryCount >= maxRetries, sets status to
- * "permanently_failed" (terminal state) instead of "failed".
+ * Mark an operation as failed. When nextRetryCount >= maxRetries, sets
+ * status to "permanently_failed" (terminal state) instead of "failed".
+ *
+ * `maxRetries` is REQUIRED at compile time: passing it incorrectly used
+ * to silently disable the terminal-state check, which is exactly the
+ * regression that prompted this constraint. See PR #15 review (A1).
  */
 export async function markOperationFailed(
   operationId: string,
   error: string,
-  maxRetries?: number
+  maxRetries: number
 ): Promise<void> {
   const operation = await db.outbox.get(operationId);
   if (!operation) return;
 
   const nextRetryCount = operation.retryCount + 1;
-  const isTerminal =
-    maxRetries !== undefined && nextRetryCount >= maxRetries;
+  const isTerminal = nextRetryCount >= maxRetries;
 
   await db.outbox.update(operationId, {
     status: isTerminal ? "permanently_failed" : "failed",
@@ -299,6 +345,7 @@ export async function createProductOffline(
       operationType: "create",
       entityType: "product",
       entityId: localId,
+      tenantId: input.tenantId,
       payload: {
         operationId,
         tenantId: input.tenantId,
@@ -439,21 +486,6 @@ export async function applyServerProductState(
   });
 }
 
-/**
- * Delete a product locally by enqueuing a soft-delete through the outbox
- * instead of a direct IndexedDB mutation. This ensures the delete is tracked.
- */
-export async function deleteLocalProduct(productId: string): Promise<void> {
-  await enqueueOperation({
-    operationType: "delete",
-    entityType: "product",
-    entityId: productId,
-    payload: {
-      productId,
-    },
-  });
-}
-
 export async function updateProductOffline(
   input: UpdateProductOfflineInput
 ): Promise<LocalProduct> {
@@ -509,6 +541,7 @@ export async function updateProductOffline(
       operationType: "update",
       entityType: "product",
       entityId: input.id,
+      tenantId: input.tenantId,
       payload: {
         operationId,
         tenantId: input.tenantId,
@@ -575,6 +608,7 @@ export async function deleteProductOffline(
       operationType: "delete",
       entityType: "product",
       entityId: input.id,
+      tenantId: input.tenantId,
       payload: {
         operationId,
         tenantId: input.tenantId,
@@ -589,14 +623,26 @@ export async function deleteProductOffline(
 /**
  * Restore a soft-deleted product by clearing deletedAt and removing any
  * pending delete operations — all within a single Dexie transaction.
+ *
+ * Pass `tenantId` to enforce ownership. When provided, this throws if
+ * the product belongs to a different tenant — important so the restore
+ * action in the delete dialog cannot accidentally revive another tenant's
+ * row.
  */
-export async function restoreProduct(productId: string): Promise<void> {
+export async function restoreProduct(
+  productId: string,
+  tenantId?: string
+): Promise<void> {
   const now = new Date().toISOString();
 
   await db.transaction("rw", db.products, db.outbox, async () => {
     const existingProduct = await db.products.get(productId);
     if (!existingProduct) {
       throw new Error("Product not found in local database");
+    }
+
+    if (tenantId !== undefined && existingProduct.tenantId !== tenantId) {
+      throw new Error("Product does not belong to the provided tenant");
     }
 
     await db.products.update(productId, {
@@ -614,12 +660,6 @@ export async function restoreProduct(productId: string): Promise<void> {
       await db.outbox.delete(op.id);
     }
   });
-}
-
-export async function permanentlyDeleteLocalProduct(
-  productId: string
-): Promise<void> {
-  await db.products.delete(productId);
 }
 
 // ──────────────────────────────────────────────────────
@@ -708,6 +748,7 @@ export async function createMovement(
         operationType: "create",
         entityType: "stockMovement",
         entityId: movementId,
+        tenantId: input.tenantId,
         payload: {
           tenantId: input.tenantId,
           productId: input.productId,
@@ -842,6 +883,266 @@ export async function getRecentProductIds(
   return productIds;
 }
 
+// ──────────────────────────────────────────────────────
+// Permanently-Failed Queries & Retry Helpers
+// ──────────────────────────────────────────────────────
+
+/**
+ * Look up all outbox rows in "permanently_failed" status for the given
+ * tenant. Uses the indexed [tenantId+status] composite when rows have
+ * a top-level tenantId (post-v6); falls back to a JS scan for legacy
+ * rows where tenantId is only in the payload.
+ */
+export async function getPermanentlyFailedOperations(
+  tenantId: string
+): Promise<OutboxOperation[]> {
+  let rows: OutboxOperation[] = [];
+  try {
+    rows = await db.outbox
+      .where("[tenantId+status]")
+      .equals([tenantId, "permanently_failed"])
+      .toArray();
+  } catch {
+    rows = [];
+  }
+
+  const legacy = await db.outbox.toArray();
+  const legacyMatching = legacy.filter(
+    (op) =>
+      op.status === "permanently_failed" &&
+      !op.tenantId &&
+      (op.payload as { tenantId?: string }).tenantId === tenantId
+  );
+
+  const byId = new Map<string, OutboxOperation>();
+  for (const op of [...rows, ...legacyMatching]) {
+    byId.set(op.id, op);
+  }
+  return Array.from(byId.values()).sort((a, b) =>
+    b.createdAt.localeCompare(a.createdAt)
+  );
+}
+
+export type RetryOutcome = "completed" | "deleted" | "noop";
+
+export interface RetryPermanentlyFailedResult {
+  outcome: RetryOutcome;
+  operationId: string;
+}
+
+/**
+ * Clean up the local entity (product or movement) associated with an
+ * outbox operation when its sync has been abandoned. The goal is to
+ * leave local state consistent with the server (which never received
+ * the change):
+ *
+ * - product create: hard-delete the local row (it never existed on
+ *   the server, so the user is back to a consistent state).
+ * - product update: revert to the server-synced snapshot stored in
+ *   the operation payload (`originalProduct`). If the snapshot is
+ *   missing, hard-delete is the safe fallback.
+ * - product delete: clear the local `syncStatus: pending_delete`
+ *   marker so the product reappears as live (the server never
+ *   confirmed the delete).
+ * - stockMovement create: hard-delete the local movement row and
+ *   recompute the product quantity by replaying only synced
+ *   movements.
+ *
+ * This function is best-effort: it never throws. Errors are swallowed
+ * and logged; the outbox row deletion still happens regardless.
+ */
+export async function cleanupLocalEntityForOp(
+  op: OutboxOperation
+): Promise<void> {
+  try {
+    if (op.entityType === "product") {
+      if (op.operationType === "create") {
+        await db.products.delete(op.entityId);
+        return;
+      }
+
+      if (op.operationType === "delete") {
+        const existing = await db.products.get(op.entityId);
+        if (existing) {
+          await db.products.update(op.entityId, {
+            deletedAt: null,
+            syncStatus: "synced",
+            updatedAt: new Date().toISOString(),
+          });
+        }
+        return;
+      }
+
+      // operationType === "update"
+      const original = (op.payload as { originalProduct?: Partial<LocalProduct> })
+        .originalProduct;
+      const existing = await db.products.get(op.entityId);
+      if (!existing) {
+        return;
+      }
+
+      if (original && typeof original === "object") {
+        const patch: Partial<LocalProduct> = {
+          syncStatus: "synced",
+          updatedAt: new Date().toISOString(),
+        };
+        if (typeof original.name === "string") patch.name = original.name;
+        if (original.description !== undefined) {
+          patch.description = (original.description as string | null) ?? null;
+        }
+        if (original.sku !== undefined) {
+          patch.sku = (original.sku as string | null) ?? null;
+        }
+        if (typeof original.category === "string" || original.category === null) {
+          patch.category = (original.category as string | null) ?? existing.category;
+        }
+        if (typeof original.unit === "string" || original.unit === null) {
+          patch.unit = (original.unit as string | null) ?? existing.unit;
+        }
+        if (original.barcode !== undefined) {
+          patch.barcode = (original.barcode as string | null) ?? null;
+        }
+        if (typeof original.price === "number") {
+          patch.price = original.price;
+        }
+        if (original.purchasePrice !== undefined) {
+          patch.purchasePrice = (original.purchasePrice as number | null) ?? null;
+        }
+        if (original.lowStockThreshold !== undefined) {
+          patch.lowStockThreshold = (original.lowStockThreshold as number | null) ?? null;
+        }
+        if (original.customCriticalThreshold !== undefined) {
+          patch.customCriticalThreshold =
+            (original.customCriticalThreshold as number | null) ?? null;
+        }
+        if (original.customAttentionThreshold !== undefined) {
+          patch.customAttentionThreshold =
+            (original.customAttentionThreshold as number | null) ?? null;
+        }
+        await db.products.put({ ...existing, ...patch });
+      } else {
+        // No snapshot to revert to — bail to hard-delete to keep state consistent.
+        await db.products.delete(op.entityId);
+      }
+      return;
+    }
+
+    if (op.entityType === "stockMovement") {
+      if (op.operationType === "create") {
+        await db.stockMovements.delete(op.entityId);
+        // Recompute the product quantity from the remaining (synced) movements.
+        const productId = (op.payload as { productId?: string }).productId;
+        if (productId) {
+          const remaining = await db.stockMovements
+            .where("productId")
+            .equals(productId)
+            .toArray();
+          const qty = remaining.reduce((total, movement) => {
+            if (movement.syncStatus === "synced") {
+              return total + (movement.type === "entry" ? movement.quantity : -movement.quantity);
+            }
+            return total;
+          }, 0);
+          const product = await db.products.get(productId);
+          if (product) {
+            await db.products.update(productId, {
+              quantity: qty,
+              syncStatus: "synced",
+              updatedAt: new Date().toISOString(),
+            });
+          }
+        }
+      }
+    }
+  } catch {
+    // best-effort cleanup: never throw. Caller deletes the outbox row regardless.
+  }
+}
+
+/**
+ * One-shot retry for a permanently_failed outbox operation:
+ *  1. Reset the op to pending (retryCount: 0, error cleared).
+ *  2. Mark it with `oneShotRetry: true` so the engine knows to treat a
+ *     final failure as "abandoned" instead of leaving it stuck.
+ *  3. Trigger a sync via the per-tenant SyncEngine singleton.
+ *  4. Wait for the engine to drain the op and report the outcome:
+ *     - "completed" — server accepted the op, it is now `completed`.
+ *     - "deleted"   — final failure; the engine deleted the outbox row
+ *                     and cleaned up the local entity.
+ *     - "noop"      — the op is no longer in permanently_failed (e.g.
+ *                     another tab already retried it).
+ *
+ * Throws if the op is not in `permanently_failed` status.
+ */
+export async function retryPermanentlyFailedOperation(
+  operationId: string
+): Promise<RetryPermanentlyFailedResult> {
+  const op = await db.outbox.get(operationId);
+  if (!op) {
+    throw new Error("Outbox operation not found");
+  }
+
+  if (op.status !== "permanently_failed") {
+    throw new Error(
+      `Cannot retry operation in status "${op.status}" (expected "permanently_failed")`
+    );
+  }
+
+  const tenantId = op.tenantId ?? (op.payload as { tenantId?: string }).tenantId;
+  if (!tenantId) {
+    throw new Error("Cannot retry operation without a tenantId");
+  }
+
+  await db.outbox.update(operationId, {
+    status: "pending",
+    retryCount: 0,
+    error: null,
+    processedAt: null,
+    oneShotRetry: true,
+  });
+
+  const engine = acquireSyncEngine({ tenantId });
+  await engine.sync();
+
+  const after = await db.outbox.get(operationId);
+  if (!after) {
+    return { outcome: "deleted", operationId };
+  }
+  if (after.status === "completed") {
+    return { outcome: "completed", operationId };
+  }
+  // Still pending/processing/failed/permanently_failed: noop. Most
+  // commonly means the retry triggered a transient failure that did
+  // not exhaust retries (status will be "failed" not "deleted"). For
+  // the UI's purposes, treat anything that did not get to "completed"
+  // and is still present as a noop result.
+  return { outcome: "noop", operationId };
+}
+
+/**
+ * Drop a permanently_failed outbox row and clean up its local entity
+ * without attempting another sync. Used by the "Dismiss" button in the
+ * permanently-failed list.
+ */
+export async function dismissPermanentlyFailedOperation(
+  operationId: string
+): Promise<void> {
+  const op = await db.outbox.get(operationId);
+  if (!op) {
+    return;
+  }
+  if (op.status !== "permanently_failed") {
+    throw new Error(
+      `Cannot dismiss operation in status "${op.status}" (expected "permanently_failed")`
+    );
+  }
+
+  await db.transaction("rw", db.products, db.stockMovements, db.outbox, async () => {
+    await cleanupLocalEntityForOp(op);
+    await db.outbox.delete(op.id);
+  });
+}
+
 export async function getPendingMovementSyncItems(
   tenantId: string
 ): Promise<PendingMovementSyncItem[]> {
@@ -853,9 +1154,9 @@ export async function getPendingMovementSyncItems(
       continue;
     }
 
-    const payloadTenantId = (operation.payload as { tenantId?: unknown })
-      .tenantId;
-    if (payloadTenantId !== tenantId) {
+    const opTenantId =
+      operation.tenantId ?? (operation.payload as { tenantId?: unknown }).tenantId;
+    if (opTenantId !== tenantId) {
       continue;
     }
 
@@ -910,12 +1211,13 @@ export async function markMovementSyncFailed(input: {
   movementId: string;
   operationId: string;
   error: string;
+  maxRetries: number;
 }): Promise<void> {
   await db.transaction("rw", db.stockMovements, db.outbox, async () => {
     await db.stockMovements.update(input.movementId, {
       syncStatus: "failed",
     });
-    await markOperationFailed(input.operationId, input.error);
+    await markOperationFailed(input.operationId, input.error, input.maxRetries);
   });
 }
 
@@ -1098,7 +1400,9 @@ class SyncEngine {
         entityType: op.entityType,
         operationType: op.operationType,
         tenantId:
-          (op.payload as { tenantId?: string }).tenantId ?? this.tenantId,
+          op.tenantId ??
+          (op.payload as { tenantId?: string }).tenantId ??
+          this.tenantId,
         payload: op.payload,
       }));
 
@@ -1115,23 +1419,49 @@ class SyncEngine {
         headers["Idempotency-Key"] = operations[0]!.operationId;
       }
 
-      const response = await fetch(this.syncEndpoint, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(request),
-        signal: this.abortController.signal,
-      });
+      let response: Response;
+      try {
+        response = await fetch(this.syncEndpoint, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(request),
+          signal: this.abortController.signal,
+        });
+      } catch (fetchError) {
+        // Network/HTTP error before we got a response: revert ONLY the ops
+        // we just claimed. See PR #15 review (B5).
+        if (fetchError instanceof Error && fetchError.name === "AbortError") {
+          return;
+        }
+        const errorMessage =
+          fetchError instanceof Error ? fetchError.message : "Sync failed";
+        this.setState({
+          state: "error",
+          lastError: errorMessage,
+        });
+        await this.markOperationsForRetry(pendingOps, errorMessage);
+        return;
+      }
 
       if (!response.ok) {
         if (response.status === 429) {
-          await this.markOperationsForRetry("Rate limited. Will retry later.");
+          await this.markOperationsForRetry(
+            pendingOps,
+            "Rate limited. Will retry later."
+          );
           this.setState({
             state: "error",
             lastError: "Rate limited. Will retry later.",
           });
           return;
         }
-        throw new Error(`Sync failed with status ${response.status}`);
+        const errorMessage = `Sync failed with status ${response.status}`;
+        this.setState({
+          state: "error",
+          lastError: errorMessage,
+        });
+        await this.markOperationsForRetry(pendingOps, errorMessage);
+        return;
       }
 
       const syncResponse: SyncResponse = await response.json();
@@ -1167,7 +1497,9 @@ class SyncEngine {
         lastError: errorMessage,
       });
 
-      await this.markOperationsForRetry(errorMessage);
+      // Without the claimed-ops set, mark ALL processing rows for retry.
+      // This is the worst-case fallback for unexpected throw escapes.
+      await this.markOperationsForRetry([], errorMessage);
     } finally {
       this.syncInProgress = false;
       this.abortController = null;
@@ -1175,19 +1507,64 @@ class SyncEngine {
   }
 
   private async getPendingCount(): Promise<number> {
-    const ops = await getPendingOperations();
-    return ops.filter(
-      (op) =>
-        op.status === "pending" &&
+    let indexed = 0;
+    try {
+      indexed = await db.outbox
+        .where("[tenantId+status]")
+        .equals([this.tenantId, "pending"])
+        .count();
+    } catch {
+      indexed = 0;
+    }
+    if (indexed > 0) {
+      return indexed;
+    }
+    // Fallback for legacy rows (pre-v6 schema) that still rely on
+    // payload.tenantId: the indexed query cannot see them.
+    const all = await db.outbox.toArray();
+    return all.filter((op) => {
+      if (op.status !== "pending") return false;
+      if (op.tenantId === this.tenantId) return true;
+      return (
+        !op.tenantId &&
         (op.payload as { tenantId?: string }).tenantId === this.tenantId
-    ).length;
+      );
+    }).length;
   }
 
+  /**
+   * Includes BOTH "failed" (retryable) and "permanently_failed"
+   * (terminal). The UI distinguishes them by looking at the
+   * permanently-failed list separately. PR #15 review (B4).
+   */
   private async getFailedCount(): Promise<number> {
-    const allOps = await db.outbox.toArray();
-    return allOps.filter((op) => {
-      const opTenantId = (op.payload as { tenantId?: string }).tenantId;
-      return opTenantId === this.tenantId && op.status === "failed";
+    let indexed = 0;
+    try {
+      const failedRows = await db.outbox
+        .where("[tenantId+status]")
+        .equals([this.tenantId, "failed"])
+        .count();
+      const permanentlyRows = await db.outbox
+        .where("[tenantId+status]")
+        .equals([this.tenantId, "permanently_failed"])
+        .count();
+      indexed = failedRows + permanentlyRows;
+    } catch {
+      indexed = 0;
+    }
+    if (indexed > 0) {
+      return indexed;
+    }
+    const all = await db.outbox.toArray();
+    return all.filter((op) => {
+      if (op.status !== "failed" && op.status !== "permanently_failed") {
+        return false;
+      }
+      if (op.tenantId === this.tenantId) return true;
+      return (
+        !op.tenantId &&
+        (op.payload as { tenantId?: string }).tenantId === this.tenantId
+      );
     }).length;
   }
 
@@ -1271,6 +1648,24 @@ class SyncEngine {
     op: OutboxOperation,
     result: SyncResult
   ): Promise<void> {
+    // oneShotRetry means the user explicitly clicked "Retry" on a
+    // permanently_failed op. If the final attempt fails again we treat
+    // the op as abandoned: clean up the local entity and delete the
+    // outbox row instead of leaving it stuck on permanently_failed.
+    if (op.oneShotRetry === true) {
+      await db.transaction(
+        "rw",
+        db.products,
+        db.stockMovements,
+        db.outbox,
+        async () => {
+          await cleanupLocalEntityForOp(op);
+          await db.outbox.delete(op.id);
+        }
+      );
+      return;
+    }
+
     await markOperationFailed(
       op.operationId,
       result.message ?? `Permanent failure: ${result.status}`,
@@ -1284,6 +1679,7 @@ class SyncEngine {
         movementId: op.entityId,
         operationId: op.operationId,
         error: result.message ?? `Permanent failure: ${result.status}`,
+        maxRetries: this.maxRetries,
       });
     }
   }
@@ -1304,14 +1700,44 @@ class SyncEngine {
     );
   }
 
-  private async markOperationsForRetry(errorMessage: string): Promise<void> {
-    const processingOps = await db.outbox
-      .where("status")
-      .equals("processing")
-      .toArray();
+  /**
+   * Revert operations currently stuck in "processing" back to "failed"
+   * (or "permanently_failed" when the retry budget is exhausted).
+   *
+   * Critical for multi-tab correctness: we MUST only touch the ops that
+   * THIS engine instance claimed this turn. The pre-PR implementation
+   * scanned every processing row globally, which meant an aborted sync
+   * in tab A would clobber a perfectly valid in-flight sync started by
+   * tab B. PR #15 review (B5).
+   *
+   * `claimedThisTurn` is the set of operations returned by
+   * `claimPendingOperations` and not yet finalised. When it is empty
+   * (e.g. unexpected throw path), we fall back to scanning the table
+   * for rows that are still "processing" but only for this tenant.
+   */
+  private async markOperationsForRetry(
+    claimedThisTurn: OutboxOperation[],
+    errorMessage: string
+  ): Promise<void> {
+    let opsToRevert: OutboxOperation[];
 
-    for (const op of processingOps) {
-      const opTenantId = (op.payload as { tenantId?: string }).tenantId;
+    if (claimedThisTurn.length > 0) {
+      opsToRevert = claimedThisTurn;
+    } else {
+      // Fallback: only consider processing rows that belong to this
+      // tenant. We do NOT cross tenant boundaries.
+      const all = await db.outbox.toArray();
+      opsToRevert = all.filter((op) => {
+        if (op.status !== "processing") return false;
+        const opTenantId =
+          op.tenantId ?? (op.payload as { tenantId?: string }).tenantId;
+        return opTenantId === this.tenantId;
+      });
+    }
+
+    for (const op of opsToRevert) {
+      const opTenantId =
+        op.tenantId ?? (op.payload as { tenantId?: string }).tenantId;
       if (opTenantId !== this.tenantId) {
         continue;
       }
@@ -1392,4 +1818,4 @@ export function createSyncEngine(config: SyncEngineConfig): SyncEngine {
   return new SyncEngine(config);
 }
 
-export type { SyncEngine };
+export type { OutboxOperation, SyncEngine };

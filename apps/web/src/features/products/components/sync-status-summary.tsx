@@ -1,6 +1,7 @@
 "use client";
 
 import { useSyncStatus } from "~/features/offline/sync/use-sync-status";
+import { PermanentlyFailedList } from "~/features/offline/components/permanently-failed-list";
 
 interface SyncStatusIndicatorProps {
   tenantId: string;
@@ -122,5 +123,10 @@ export function SyncStatusIndicator({
 }
 
 export function SyncStatusSummary({ tenantId }: { tenantId: string }) {
-  return <SyncStatusIndicator tenantId={tenantId} />;
+  return (
+    <div className="space-y-3">
+      <SyncStatusIndicator tenantId={tenantId} />
+      <PermanentlyFailedList tenantId={tenantId} />
+    </div>
+  );
 }

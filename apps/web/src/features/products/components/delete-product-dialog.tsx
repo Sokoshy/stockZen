@@ -77,7 +77,7 @@ export function DeleteProductDialog({
     }
 
     try {
-      await restoreProduct(product.id);
+      await restoreProduct(product.id, tenantId);
       setShowUndo(false);
       onRestored?.();
     } catch (err) {
