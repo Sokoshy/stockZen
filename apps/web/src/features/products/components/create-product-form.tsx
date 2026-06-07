@@ -8,7 +8,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 
 import { productInputBaseSchema } from "~/schemas/products";
-import { createProductOffline } from "~/features/offline/product-operations";
+import { createProductOffline } from "~/features/offline/sync-pipeline";
 import { api } from "~/trpc/react";
 
 const createProductFormSchema = productInputBaseSchema

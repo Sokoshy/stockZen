@@ -29,7 +29,12 @@ type MockOutbox = {
   entityType: "product" | "stockMovement";
   entityId: string;
   payload: Record<string, unknown>;
-  status: "pending" | "processing" | "completed" | "failed";
+  status:
+    | "pending"
+    | "processing"
+    | "completed"
+    | "failed"
+    | "permanently_failed";
   retryCount: number;
   createdAt: string;
   processedAt: string | null;
@@ -54,10 +59,15 @@ const state = vi.hoisted(() => {
 });
 
 vi.mock("~/features/offline/database", () => {
-  const stockMovementWhere = (field: "productId" | "tenantId" | "[tenantId+syncStatus]") => ({
+  const stockMovementWhere = (
+    field: "productId" | "tenantId" | "[tenantId+syncStatus]"
+  ) => ({
     equals(value: unknown) {
       if (field === "[tenantId+syncStatus]") {
-        const [tenantId, syncStatus] = value as [string, MockMovement["syncStatus"]];
+        const [tenantId, syncStatus] = value as [
+          string,
+          MockMovement["syncStatus"],
+        ];
         const filtered = Array.from(state.movements.values()).filter(
           (item) => item.tenantId === tenantId && item.syncStatus === syncStatus
         );
@@ -123,72 +133,82 @@ vi.mock("~/features/offline/database", () => {
   };
 });
 
-vi.mock("~/features/offline/outbox", () => ({
-  enqueueOperation: async (input: {
-    operationId?: string;
-    operationType: "create" | "update" | "delete";
-    entityType: "product" | "stockMovement";
-    entityId: string;
-    payload: Record<string, unknown>;
-  }) => {
-    const operationId = input.operationId ?? crypto.randomUUID();
-    const now = new Date().toISOString();
+vi.mock("~/features/offline/sync-pipeline", async (importOriginal) => {
+  const original = await importOriginal<
+    typeof import("~/features/offline/sync-pipeline")
+  >();
+  return {
+    ...original,
+    enqueueOperation: async (input: {
+      operationId?: string;
+      operationType: "create" | "update" | "delete";
+      entityType: "product" | "stockMovement";
+      entityId: string;
+      payload: Record<string, unknown>;
+    }) => {
+      const operationId = input.operationId ?? crypto.randomUUID();
+      const now = new Date().toISOString();
 
-    state.outbox.set(operationId, {
-      id: operationId,
-      operationId,
-      operationType: input.operationType,
-      entityType: input.entityType,
-      entityId: input.entityId,
-      payload: {
-        ...input.payload,
+      state.outbox.set(operationId, {
+        id: operationId,
         operationId,
-      },
-      status: "pending",
-      retryCount: 0,
-      createdAt: now,
-      processedAt: null,
-      error: null,
-    });
+        operationType: input.operationType,
+        entityType: input.entityType,
+        entityId: input.entityId,
+        payload: {
+          ...input.payload,
+          operationId,
+        },
+        status: "pending",
+        retryCount: 0,
+        createdAt: now,
+        processedAt: null,
+        error: null,
+      });
 
-    return operationId;
-  },
-  getPendingOperations: async () =>
-    Array.from(state.outbox.values()).filter(
-      (operation) => operation.status === "pending" || operation.status === "failed"
-    ),
-  markOperationProcessing: async (operationId: string) => {
-    const operation = state.outbox.get(operationId);
-    if (!operation) return;
-    state.outbox.set(operationId, {
-      ...operation,
-      status: "processing",
-    });
-  },
-  markOperationCompleted: async (operationId: string, serverSyncedId?: string) => {
-    const operation = state.outbox.get(operationId);
-    if (!operation) return;
-    state.outbox.set(operationId, {
-      ...operation,
-      status: "completed",
-      payload: {
-        ...operation.payload,
-        ...(serverSyncedId ? { serverId: serverSyncedId } : {}),
-      },
-      processedAt: new Date().toISOString(),
-    });
-  },
-  markOperationFailed: async (operationId: string, error: string) => {
-    const operation = state.outbox.get(operationId);
-    if (!operation) return;
-    state.outbox.set(operationId, {
-      ...operation,
-      status: "failed",
-      retryCount: operation.retryCount + 1,
-      error,
-    });
-  },
-}));
+      return operationId;
+    },
+    getPendingOperations: async () =>
+      Array.from(state.outbox.values()).filter(
+        (operation) =>
+          operation.status === "pending" || operation.status === "failed"
+      ),
+    markOperationProcessing: async (operationId: string) => {
+      const operation = state.outbox.get(operationId);
+      if (!operation) return;
+      state.outbox.set(operationId, {
+        ...operation,
+        status: "processing",
+      });
+    },
+    markOperationCompleted: async (
+      operationId: string,
+      serverSyncedId?: string
+    ) => {
+      const operation = state.outbox.get(operationId);
+      if (!operation) return;
+      state.outbox.set(operationId, {
+        ...operation,
+        status: "completed",
+        payload: {
+          ...operation.payload,
+          ...(serverSyncedId ? { serverId: serverSyncedId } : {}),
+        },
+        processedAt: new Date().toISOString(),
+      });
+    },
+    markOperationFailed: async (operationId: string, error: string) => {
+      const operation = state.outbox.get(operationId);
+      if (!operation) return;
+      state.outbox.set(operationId, {
+        ...operation,
+        status: "failed",
+        retryCount: operation.retryCount + 1,
+        error,
+      });
+    },
+  };
+});
 
 import {
   createMovement,
@@ -198,7 +218,7 @@ import {
   markMovementSynced,
   markMovementSyncFailed,
   markMovementSyncing,
-} from "~/features/offline/movement-operations";
+} from "~/features/offline/sync-pipeline";
 
 const TENANT_ID = "00000000-0000-0000-0000-000000000010";
 const PRODUCT_ID = "00000000-0000-0000-0000-000000000011";
@@ -397,7 +417,9 @@ describe("E2E - Movement history offline visibility", () => {
       productId: PRODUCT_ID,
     });
 
-    expect(history.some((movement) => movement.id === "foreign-movement")).toBe(false);
+    expect(
+      history.some((movement) => movement.id === "foreign-movement")
+    ).toBe(false);
     expect(history.some((movement) => movement.id === movementId)).toBe(true);
   });
 
@@ -428,7 +450,9 @@ describe("E2E - Movement history offline visibility", () => {
     });
 
     const movements = Array.from(state.movements.values()).sort(
-      (a, b) => new Date(b.clientCreatedAt).getTime() - new Date(a.clientCreatedAt).getTime()
+      (a, b) =>
+        new Date(b.clientCreatedAt).getTime() -
+        new Date(a.clientCreatedAt).getTime()
     );
 
     expect(movements[0]?.quantity).toBe(2);
@@ -449,7 +473,8 @@ describe("E2E - Movement history offline visibility", () => {
 
     expect(state.movements.get(movementId)?.syncStatus).toBe("pending");
 
-    const pendingItemsBeforeProcessing = await getPendingMovementSyncItems(TENANT_ID);
+    const pendingItemsBeforeProcessing =
+      await getPendingMovementSyncItems(TENANT_ID);
     expect(pendingItemsBeforeProcessing).toHaveLength(1);
     expect(pendingItemsBeforeProcessing[0]?.movementId).toBe(movementId);
 

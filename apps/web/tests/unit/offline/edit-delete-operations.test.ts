@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockDb, enqueueOperationMock } = vi.hoisted(() => ({
+const { mockDb } = vi.hoisted(() => ({
   mockDb: {
     transaction: vi.fn(async (...args: unknown[]) => {
       const callback = args[args.length - 1] as () => Promise<unknown>;
@@ -12,6 +12,7 @@ const { mockDb, enqueueOperationMock } = vi.hoisted(() => ({
       update: vi.fn(),
     },
     outbox: {
+      add: vi.fn(),
       where: vi.fn().mockReturnThis(),
       equals: vi.fn().mockReturnThis(),
       and: vi.fn().mockReturnThis(),
@@ -19,22 +20,17 @@ const { mockDb, enqueueOperationMock } = vi.hoisted(() => ({
       delete: vi.fn(),
     },
   },
-  enqueueOperationMock: vi.fn(),
 }));
 
 vi.mock("~/features/offline/database", () => ({
   db: mockDb,
 }));
 
-vi.mock("~/features/offline/outbox", () => ({
-  enqueueOperation: enqueueOperationMock,
-}));
-
 import {
   updateProductOffline,
   deleteProductOffline,
   restoreProduct,
-} from "~/features/offline/product-operations";
+} from "~/features/offline/sync-pipeline";
 
 describe("updateProductOffline", () => {
   beforeEach(() => {
@@ -59,6 +55,8 @@ describe("updateProductOffline", () => {
       purchasePrice: 5,
       quantity: 5,
       lowStockThreshold: null,
+      customCriticalThreshold: null,
+      customAttentionThreshold: null,
       syncStatus: "synced" as const,
       createdAt: "2026-02-15T10:00:00.000Z",
       updatedAt: "2026-02-15T10:00:00.000Z",
@@ -67,7 +65,6 @@ describe("updateProductOffline", () => {
 
     mockDb.products.get.mockResolvedValue(existingProduct);
     mockDb.products.put.mockResolvedValue(undefined);
-    enqueueOperationMock.mockResolvedValue("operation-id-002");
 
     const result = await updateProductOffline({
       id: "product-1",
@@ -89,7 +86,7 @@ describe("updateProductOffline", () => {
       })
     );
 
-    expect(enqueueOperationMock).toHaveBeenCalledWith(
+    expect(mockDb.outbox.add).toHaveBeenCalledWith(
       expect.objectContaining({
         operationType: "update",
         entityType: "product",
@@ -150,6 +147,8 @@ describe("deleteProductOffline", () => {
       purchasePrice: 5,
       quantity: 5,
       lowStockThreshold: null,
+      customCriticalThreshold: null,
+      customAttentionThreshold: null,
       syncStatus: "synced" as const,
       createdAt: "2026-02-15T10:00:00.000Z",
       updatedAt: "2026-02-15T10:00:00.000Z",
@@ -158,7 +157,6 @@ describe("deleteProductOffline", () => {
 
     mockDb.products.get.mockResolvedValue(existingProduct);
     mockDb.products.update.mockResolvedValue(undefined);
-    enqueueOperationMock.mockResolvedValue("operation-id-003");
 
     await deleteProductOffline({
       id: "product-1",
@@ -173,7 +171,7 @@ describe("deleteProductOffline", () => {
       updatedAt: now,
     });
 
-    expect(enqueueOperationMock).toHaveBeenCalledWith(
+    expect(mockDb.outbox.add).toHaveBeenCalledWith(
       expect.objectContaining({
         operationType: "delete",
         entityType: "product",
@@ -195,7 +193,7 @@ describe("restoreProduct", () => {
     vi.clearAllMocks();
   });
 
-  it("restores a deleted product by clearing deletedAt", async () => {
+  it("restores a deleted product by clearing deletedAt in a transaction", async () => {
     const now = "2026-02-16T12:00:00.000Z";
     vi.useFakeTimers();
     vi.setSystemTime(new Date(now));
@@ -210,12 +208,24 @@ describe("restoreProduct", () => {
     mockDb.products.get.mockResolvedValue(deletedProduct);
     mockDb.products.update.mockResolvedValue(undefined);
     mockDb.outbox.toArray.mockResolvedValue([
-      { id: "op-1", entityId: "product-1", operationType: "delete", status: "pending" },
+      {
+        id: "op-1",
+        entityId: "product-1",
+        operationType: "delete",
+        status: "pending",
+      },
     ]);
     mockDb.outbox.delete.mockResolvedValue(undefined);
 
     await restoreProduct("product-1");
 
+    expect(mockDb.transaction).toHaveBeenCalledTimes(1);
+    expect(mockDb.transaction).toHaveBeenCalledWith(
+      "rw",
+      mockDb.products,
+      mockDb.outbox,
+      expect.any(Function)
+    );
     expect(mockDb.products.update).toHaveBeenCalledWith("product-1", {
       deletedAt: null,
       updatedAt: now,

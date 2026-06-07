@@ -41,7 +41,7 @@ export interface OutboxOperation {
   entityType: "product" | "stockMovement";
   entityId: string;
   payload: Record<string, unknown>;
-  status: "pending" | "processing" | "completed" | "failed";
+  status: "pending" | "processing" | "completed" | "failed" | "permanently_failed";
   retryCount: number;
   createdAt: string;
   processedAt: string | null;

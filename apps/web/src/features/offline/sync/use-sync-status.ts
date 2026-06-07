@@ -8,7 +8,7 @@ import {
   type SyncState,
   type SyncEngine,
   type SyncEngineConfig,
-} from "./sync-engine";
+} from "~/features/offline/sync-pipeline";
 
 export interface UseSyncStatusOptions {
   tenantId: string;

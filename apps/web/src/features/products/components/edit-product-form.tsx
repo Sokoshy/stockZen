@@ -7,7 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 
 import { productInputBaseSchema, type ThresholdMode } from "~/schemas/products";
-import { updateProductOffline } from "~/features/offline/product-operations";
+import { updateProductOffline } from "~/features/offline/sync-pipeline";
 import { api } from "~/trpc/react";
 
 const editProductFormSchema = productInputBaseSchema.partial().superRefine((data, ctx) => {

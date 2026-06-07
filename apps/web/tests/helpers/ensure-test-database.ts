@@ -439,6 +439,10 @@ export async function ensureTestDatabaseReady(): Promise<void> {
 
   const target = postgres(testDatabaseUrlRaw, { max: 1 });
   try {
+    // Prevent hanging on stale locks left by abandoned test connections.
+    await target.unsafe(`SET lock_timeout = '5s';`);
+    await target.unsafe(`SET statement_timeout = '10s';`);
+
     const tableCheck = await target<{ exists: boolean }[]>`
       select exists (
         select 1

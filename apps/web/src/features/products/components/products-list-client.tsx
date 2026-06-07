@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { TenantRole } from "~/schemas/team-membership";
 import type { ProductWithAlertOutput } from "~/schemas/products";
 import type { LocalProduct } from "~/features/offline/database";
-import { getLocalProducts } from "~/features/offline/product-operations";
+import { getLocalProducts } from "~/features/offline/sync-pipeline";
 import { ProductsTable } from "../components/products-table";
 import { ProductFilters } from "../components/product-filters";
 import { useProductFilters } from "../hooks/use-product-filters";

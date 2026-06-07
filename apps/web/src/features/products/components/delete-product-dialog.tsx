@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useCallback } from "react";
-import { deleteProductOffline, restoreProduct } from "~/features/offline/product-operations";
+import { deleteProductOffline, restoreProduct } from "~/features/offline/sync-pipeline";
 import { api } from "~/trpc/react";
 
 type DeleteProductDialogProps = {
