@@ -13,6 +13,8 @@ type MockProduct = {
   purchasePrice: number | null;
   quantity: number;
   lowStockThreshold: number | null;
+  customCriticalThreshold: number | null;
+  customAttentionThreshold: number | null;
   syncStatus: "pending" | "synced" | "failed";
   createdAt: string;
   updatedAt: string;
@@ -26,7 +28,7 @@ type MockOutboxOperation = {
   entityType: "product";
   entityId: string;
   payload: Record<string, unknown>;
-  status: "pending" | "processing" | "completed" | "failed";
+  status: "pending" | "processing" | "completed" | "failed" | "permanently_failed";
   retryCount: number;
   createdAt: string;
   processedAt: string | null;
@@ -60,7 +62,9 @@ const state = vi.hoisted(() => {
 vi.mock("~/features/offline/database", () => {
   const productsWhere = (field: keyof MockProduct) => ({
     equals(value: unknown) {
-      const base = state.getProductsArray().filter((item) => item[field] === value);
+      const base = state
+        .getProductsArray()
+        .filter((item) => item[field] === value);
       return {
         and(predicate: (item: MockProduct) => boolean) {
           const filtered = base.filter(predicate);
@@ -77,7 +81,9 @@ vi.mock("~/features/offline/database", () => {
 
   const outboxWhere = (field: keyof MockOutboxOperation) => ({
     equals(value: unknown) {
-      const base = state.getOutboxArray().filter((item) => item[field] === value);
+      const base = state
+        .getOutboxArray()
+        .filter((item) => item[field] === value);
       return {
         and(predicate: (item: MockOutboxOperation) => boolean) {
           const filtered = base.filter(predicate);
@@ -124,37 +130,43 @@ vi.mock("~/features/offline/database", () => {
   };
 });
 
-vi.mock("~/features/offline/outbox", () => ({
-  enqueueOperation: async (input: {
-    operationId?: string;
-    operationType: "create" | "update" | "delete";
-    entityType: "product";
-    entityId: string;
-    payload: Record<string, unknown>;
-  }) => {
-    const operationId = input.operationId ?? crypto.randomUUID();
-    const now = new Date().toISOString();
+vi.mock("~/features/offline/sync-pipeline", async (importOriginal) => {
+  const original = await importOriginal<
+    typeof import("~/features/offline/sync-pipeline")
+  >();
+  return {
+    ...original,
+    enqueueOperation: async (input: {
+      operationId?: string;
+      operationType: "create" | "update" | "delete";
+      entityType: "product";
+      entityId: string;
+      payload: Record<string, unknown>;
+    }) => {
+      const operationId = input.operationId ?? crypto.randomUUID();
+      const now = new Date().toISOString();
 
-    state.outbox.set(operationId, {
-      id: operationId,
-      operationId,
-      operationType: input.operationType,
-      entityType: input.entityType,
-      entityId: input.entityId,
-      payload: {
-        ...input.payload,
+      state.outbox.set(operationId, {
+        id: operationId,
         operationId,
-      },
-      status: "pending",
-      retryCount: 0,
-      createdAt: now,
-      processedAt: null,
-      error: null,
-    });
+        operationType: input.operationType,
+        entityType: input.entityType,
+        entityId: input.entityId,
+        payload: {
+          ...input.payload,
+          operationId,
+        },
+        status: "pending",
+        retryCount: 0,
+        createdAt: now,
+        processedAt: null,
+        error: null,
+      });
 
-    return operationId;
-  },
-}));
+      return operationId;
+    },
+  };
+});
 
 import {
   createProductOffline,
@@ -162,7 +174,7 @@ import {
   getLocalProducts,
   restoreProduct,
   updateProductOffline,
-} from "~/features/offline/product-operations";
+} from "~/features/offline/sync-pipeline";
 
 const TENANT_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -206,7 +218,8 @@ describe("E2E - Offline edit/delete flow", () => {
     expect(pendingAfterUpdate).toHaveLength(2);
     expect(
       pendingAfterUpdate.every(
-        (operation) => (operation.payload as { tenantId?: unknown }).tenantId === TENANT_ID
+        (operation) =>
+          (operation.payload as { tenantId?: unknown }).tenantId === TENANT_ID
       )
     ).toBe(true);
 
@@ -222,11 +235,13 @@ describe("E2E - Offline edit/delete flow", () => {
     const pendingAfterDelete = state
       .getOutboxArray()
       .filter((operation) => operation.status === "pending");
-    expect(pendingAfterDelete.some((operation) => operation.operationType === "delete")).toBe(
-      true
-    );
+    expect(
+      pendingAfterDelete.some(
+        (operation) => operation.operationType === "delete"
+      )
+    ).toBe(true);
 
-    await restoreProduct(created.id);
+    await restoreProduct(created.id, TENANT_ID);
 
     localProducts = await getLocalProducts(TENANT_ID);
     expect(localProducts).toHaveLength(1);
@@ -235,8 +250,10 @@ describe("E2E - Offline edit/delete flow", () => {
     const pendingAfterRestore = state
       .getOutboxArray()
       .filter((operation) => operation.status === "pending");
-    expect(pendingAfterRestore.some((operation) => operation.operationType === "delete")).toBe(
-      false
-    );
+    expect(
+      pendingAfterRestore.some(
+        (operation) => operation.operationType === "delete"
+      )
+    ).toBe(false);
   });
 });

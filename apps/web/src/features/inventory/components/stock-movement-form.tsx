@@ -10,12 +10,10 @@ import { stockMovementSchema } from "~/schemas/stock-movements";
 import {
   createMovement,
   getRecentProductIds,
-} from "~/features/offline/movement-operations";
-import {
   acquireSyncEngine,
   getSyncEngine,
   releaseSyncEngine,
-} from "~/features/offline/sync/sync-engine";
+} from "~/features/offline/sync-pipeline";
 import { api } from "~/trpc/react";
 import { ProductSelector } from "./product-selector";
 import { MovementTypeToggle } from "./movement-type-toggle";

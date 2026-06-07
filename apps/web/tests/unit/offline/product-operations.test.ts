@@ -1,34 +1,34 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { addProductMock, enqueueOperationMock, transactionMock } = vi.hoisted(() => ({
-  addProductMock: vi.fn(),
-  enqueueOperationMock: vi.fn(),
-  transactionMock: vi.fn(async (...args: unknown[]) => {
-    const callback = args[args.length - 1] as () => Promise<unknown>;
-    return callback();
-  }),
-}));
+const { addProductMock, outboxAddMock, transactionMock } = vi.hoisted(
+  () => ({
+    addProductMock: vi.fn(),
+    outboxAddMock: vi.fn(),
+    transactionMock: vi.fn(async (...args: unknown[]) => {
+      const callback = args[args.length - 1] as () => Promise<unknown>;
+      return callback();
+    }),
+  })
+);
 
 vi.mock("~/features/offline/database", () => ({
   db: {
     products: {
       add: addProductMock,
     },
-    outbox: {},
+    outbox: { add: outboxAddMock },
     transaction: transactionMock,
   },
 }));
 
-vi.mock("~/features/offline/outbox", () => ({
-  enqueueOperation: enqueueOperationMock,
-}));
-
-import { createProductOffline } from "~/features/offline/product-operations";
+import {
+  createProductOffline,
+} from "~/features/offline/sync-pipeline";
 
 describe("createProductOffline", () => {
   beforeEach(() => {
     addProductMock.mockReset();
-    enqueueOperationMock.mockReset();
+    outboxAddMock.mockReset();
     transactionMock.mockClear();
   });
 
@@ -37,8 +37,6 @@ describe("createProductOffline", () => {
       .spyOn(globalThis.crypto, "randomUUID")
       .mockReturnValueOnce("local-product-id")
       .mockReturnValueOnce("operation-id-001");
-
-    enqueueOperationMock.mockResolvedValue("operation-id-001");
 
     const result = await createProductOffline({
       tenantId: "tenant-1",
@@ -68,7 +66,7 @@ describe("createProductOffline", () => {
       })
     );
 
-    expect(enqueueOperationMock).toHaveBeenCalledWith(
+    expect(outboxAddMock).toHaveBeenCalledWith(
       expect.objectContaining({
         operationId: "operation-id-001",
         operationType: "create",

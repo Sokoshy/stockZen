@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { type LocalProduct } from "~/features/offline/database";
-import { getLocalProductById } from "~/features/offline/product-operations";
+import { getLocalProductById } from "~/features/offline/sync-pipeline";
 import { api } from "~/trpc/react";
 import { EditProductForm } from "./edit-product-form";
 

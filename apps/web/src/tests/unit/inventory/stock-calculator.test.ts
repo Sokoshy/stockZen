@@ -16,7 +16,14 @@ vi.mock("~/features/offline/database", () => ({
   },
 }));
 
-import { calculateLocalStock } from "~/features/offline/movement-operations";
+vi.mock("~/features/offline/sync-pipeline", async (importOriginal) => {
+  const original = await importOriginal<typeof import("~/features/offline/sync-pipeline")>();
+  return {
+    ...original,
+  };
+});
+
+import { calculateLocalStock } from "~/features/offline/sync-pipeline";
 
 describe("calculateLocalStock", () => {
   const productId = "prod-456";

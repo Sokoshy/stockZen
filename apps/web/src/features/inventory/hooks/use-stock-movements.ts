@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { api } from "~/trpc/react";
 import {
   getMovementsByProduct as getLocalMovements,
-} from "~/features/offline/movement-operations";
+} from "~/features/offline/sync-pipeline";
 
 export type SyncStatus = "pending" | "synced" | "failed" | "processing";
 

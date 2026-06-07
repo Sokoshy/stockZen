@@ -7,7 +7,7 @@ type MockOutboxOperation = {
   operationType: "create" | "update" | "delete";
   entityType: "product" | "stockMovement";
   payload: Record<string, unknown>;
-  status: "pending" | "processing" | "completed" | "failed";
+  status: "pending" | "processing" | "completed" | "failed" | "permanently_failed";
   retryCount: number;
   createdAt: string;
   processedAt: string | null;
@@ -120,71 +120,107 @@ vi.mock("~/features/offline/database", () => ({
   },
 }));
 
-vi.mock("~/features/offline/outbox", () => ({
-  markOperationCompleted: async (operationId: string) => {
-    const op = state.outbox.get(operationId);
-    if (op) {
-      state.outbox.set(operationId, {
-        ...op,
-        status: "completed",
-        processedAt: new Date().toISOString(),
+vi.mock("~/features/offline/sync-pipeline", async (importOriginal) => {
+  const original = await importOriginal<
+    typeof import("~/features/offline/sync-pipeline")
+  >();
+  return {
+    ...original,
+    markOperationCompleted: async (operationId: string, serverSyncedId?: string) => {
+      const op = state.outbox.get(operationId);
+      if (op) {
+        state.outbox.set(operationId, {
+          ...op,
+          status: "completed",
+          processedAt: new Date().toISOString(),
+          ...(serverSyncedId
+            ? { payload: { ...op.payload, serverId: serverSyncedId } }
+            : {}),
+        });
+      }
+    },
+    markOperationFailed: async (operationId: string, error: string) => {
+      const op = state.outbox.get(operationId);
+      if (op) {
+        state.outbox.set(operationId, {
+          ...op,
+          status: "failed",
+          error,
+          retryCount: op.retryCount + 1,
+        });
+      }
+    },
+    markOperationProcessing: async (operationId: string) => {
+      const op = state.outbox.get(operationId);
+      if (op) {
+        state.outbox.set(operationId, { ...op, status: "processing" });
+      }
+    },
+    updateProductSyncStatus: async (
+      productId: string,
+      status: "pending" | "synced" | "failed"
+    ) => {
+      const product = state.products.get(productId);
+      if (product) {
+        state.products.set(productId, { ...product, syncStatus: status });
+      }
+    },
+    applyServerProductState: async () => {
+      return;
+    },
+    markMovementSynced: async (input: {
+      movementId: string;
+      operationId: string;
+    }) => {
+      const movement = state.stockMovements.get(input.movementId);
+      if (movement) {
+        state.stockMovements.set(input.movementId, {
+          ...movement,
+          syncStatus: "synced",
+          syncedAt: new Date().toISOString(),
+        });
+      }
+    },
+    markMovementSyncFailed: async (input: {
+      movementId: string;
+      operationId: string;
+      error: string;
+    }) => {
+      const movement = state.stockMovements.get(input.movementId);
+      if (movement) {
+        state.stockMovements.set(input.movementId, {
+          ...movement,
+          syncStatus: "failed",
+        });
+      }
+    },
+    claimPendingOperations: async (
+      tenantId: string,
+      maxRetries: number
+    ) => {
+      const allOps = Array.from(state.outbox.values());
+      const now = Date.now();
+      return allOps.filter((op) => {
+        if (op.status !== "pending" && op.status !== "failed") {
+          return false;
+        }
+        const opTenantId = (op.payload as { tenantId?: string }).tenantId;
+        if (opTenantId !== tenantId) {
+          return false;
+        }
+        if (op.status === "failed" && op.retryCount >= maxRetries) {
+          return false;
+        }
+        return true;
       });
-    }
-  },
-  markOperationFailed: async (operationId: string, error: string) => {
-    const op = state.outbox.get(operationId);
-    if (op) {
-      state.outbox.set(operationId, {
-        ...op,
-        status: "failed",
-        error,
-        retryCount: op.retryCount + 1,
-      });
-    }
-  },
-  markOperationProcessing: async (operationId: string) => {
-    const op = state.outbox.get(operationId);
-    if (op) {
-      state.outbox.set(operationId, { ...op, status: "processing" });
-    }
-  },
-}));
+    },
+  };
+});
 
-vi.mock("~/features/offline/product-operations", () => ({
-  updateProductSyncStatus: async (productId: string, status: "pending" | "synced" | "failed") => {
-    const product = state.products.get(productId);
-    if (product) {
-      state.products.set(productId, { ...product, syncStatus: status });
-    }
-  },
-  applyServerProductState: async () => {
-    return;
-  },
-}));
-
-vi.mock("~/features/offline/movement-operations", () => ({
-  markMovementSynced: async (input: { movementId: string; operationId: string }) => {
-    const movement = state.stockMovements.get(input.movementId);
-    if (movement) {
-      state.stockMovements.set(input.movementId, {
-        ...movement,
-        syncStatus: "synced",
-        syncedAt: new Date().toISOString(),
-      });
-    }
-  },
-  markMovementSyncFailed: async (input: { movementId: string; operationId: string; error: string }) => {
-    const movement = state.stockMovements.get(input.movementId);
-    if (movement) {
-      state.stockMovements.set(input.movementId, {
-        ...movement,
-        syncStatus: "failed",
-      });
-    }
-  },
-}));
-
-import { createSyncEngine, type SyncEngineState } from "~/features/offline/sync/sync-engine";
+import {
+  createSyncEngine,
+  type SyncEngineState,
+} from "~/features/offline/sync-pipeline";
 
 const TENANT_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -236,7 +272,13 @@ describe("E2E - Offline Auto-Sync", () => {
         ok: true,
         json: async () => ({
           checkpoint: new Date().toISOString(),
-          results: [{ operationId, status: "success", serverState: { id: productId } }],
+          results: [
+            {
+              operationId,
+              status: "success",
+              serverState: { id: productId },
+            },
+          ],
         }),
       });
 
@@ -303,7 +345,13 @@ describe("E2E - Offline Auto-Sync", () => {
         ok: true,
         json: async () => ({
           checkpoint: new Date().toISOString(),
-          results: [{ operationId, status: "success", serverState: { id: movementId } }],
+          results: [
+            {
+              operationId,
+              status: "success",
+              serverState: { id: movementId },
+            },
+          ],
         }),
       });
 
@@ -412,7 +460,13 @@ describe("E2E - Offline Auto-Sync", () => {
         ok: true,
         json: async () => ({
           checkpoint: new Date().toISOString(),
-          results: [{ operationId, status: "validation_error", message: "Invalid data" }],
+          results: [
+            {
+              operationId,
+              status: "validation_error",
+              message: "Invalid data",
+            },
+          ],
         }),
       });
 
@@ -506,11 +560,13 @@ describe("E2E - Offline Auto-Sync", () => {
         ok: true,
         json: async () => ({
           checkpoint: new Date().toISOString(),
-          results: [{
-            operationId,
-            status: "conflict_resolved",
-            serverState: { id: productId, name: "Server Name" },
-          }],
+          results: [
+            {
+              operationId,
+              status: "conflict_resolved",
+              serverState: { id: productId, name: "Server Name" },
+            },
+          ],
         }),
       });
 

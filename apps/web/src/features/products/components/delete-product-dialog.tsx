@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useCallback } from "react";
-import { deleteProductOffline, restoreProduct } from "~/features/offline/product-operations";
+import { deleteProductOffline, restoreProduct } from "~/features/offline/sync-pipeline";
 import { api } from "~/trpc/react";
 
 type DeleteProductDialogProps = {
@@ -77,7 +77,7 @@ export function DeleteProductDialog({
     }
 
     try {
-      await restoreProduct(product.id);
+      await restoreProduct(product.id, tenantId);
       setShowUndo(false);
       onRestored?.();
     } catch (err) {

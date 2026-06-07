@@ -5,11 +5,18 @@ const {
   mockDbOutbox,
   mockDbStockMovements,
   mockDbProducts,
+  mockTransaction,
 } = vi.hoisted(() => ({
   mockFetch: vi.fn(),
+  mockTransaction: vi.fn(async (...args: unknown[]) => {
+    // Dexie-style: transaction(mode, ...tables, callback)
+    const callback = args[args.length - 1] as () => Promise<unknown>;
+    return callback();
+  }),
   mockDbOutbox: {
     toArray: vi.fn(),
     update: vi.fn(),
+    get: vi.fn(),
     where: vi.fn(() => ({
       equals: vi.fn(() => ({
         toArray: vi.fn().mockResolvedValue([]),
@@ -20,6 +27,7 @@ const {
     update: vi.fn(),
   },
   mockDbProducts: {
+    get: vi.fn(),
     update: vi.fn(),
   },
 }));
@@ -28,29 +36,53 @@ vi.stubGlobal("fetch", mockFetch);
 
 vi.mock("~/features/offline/database", () => ({
   db: {
+    transaction: mockTransaction,
     outbox: mockDbOutbox,
     stockMovements: mockDbStockMovements,
     products: mockDbProducts,
   },
 }));
 
-vi.mock("~/features/offline/outbox", () => ({
-  markOperationCompleted: vi.fn(),
-  markOperationFailed: vi.fn(),
-  markOperationProcessing: vi.fn(),
-}));
+vi.mock("~/features/offline/sync-pipeline", async (importOriginal) => {
+  const original = await importOriginal<
+    typeof import("~/features/offline/sync-pipeline")
+  >();
+  return {
+    ...original,
+    markOperationCompleted: vi.fn(),
+    markOperationFailed: vi.fn(),
+    markOperationProcessing: vi.fn(),
+    updateProductSyncStatus: vi.fn(),
+    applyServerProductState: vi.fn(),
+    markMovementSynced: vi.fn(),
+    markMovementSyncFailed: vi.fn(),
+    claimPendingOperations: vi.fn(
+      async (
+        tenantId: string,
+        _maxRetries: number,
+        _baseRetryDelayMs: number,
+        _maxRetryDelayMs: number
+      ) => {
+        const allOps = await mockDbOutbox.toArray();
+        return allOps.filter(
+          (op: { payload: { tenantId?: string }; status: string }) => {
+            if (op.status !== "pending" && op.status !== "failed") {
+              return false;
+            }
+            return (
+              (op.payload as { tenantId?: string }).tenantId === tenantId
+            );
+          }
+        );
+      }
+    ),
+  };
+});
 
-vi.mock("~/features/offline/product-operations", () => ({
-  updateProductSyncStatus: vi.fn(),
-  applyServerProductState: vi.fn(),
-}));
-
-vi.mock("~/features/offline/movement-operations", () => ({
-  markMovementSynced: vi.fn(),
-  markMovementSyncFailed: vi.fn(),
-}));
-
-import { createSyncEngine, type SyncEngineState } from "~/features/offline/sync/sync-engine";
+import {
+  createSyncEngine,
+  type SyncEngineState,
+} from "~/features/offline/sync-pipeline";
 
 describe("SyncEngine", () => {
   const tenantId = "test-tenant-id";
@@ -66,14 +98,14 @@ describe("SyncEngine", () => {
   describe("state machine transitions", () => {
     it("starts with offline state when navigator.onLine is false", async () => {
       vi.stubGlobal("navigator", { onLine: false });
-      
+
       const states: SyncEngineState[] = [];
       const unsubscribe = engine.subscribe((state) => states.push(state));
-      
+
       await engine.start();
-      
+
       expect(states[0]?.state).toBe("offline");
-      
+
       unsubscribe();
       engine.stop();
     });
@@ -83,18 +115,21 @@ describe("SyncEngine", () => {
       mockDbOutbox.toArray.mockResolvedValue([]);
       mockFetch.mockResolvedValue({
         ok: true,
-        json: async () => ({ checkpoint: "2026-01-01T00:00:00Z", results: [] }),
+        json: async () => ({
+          checkpoint: "2026-01-01T00:00:00Z",
+          results: [],
+        }),
       });
 
       const states: SyncEngineState[] = [];
       const unsubscribe = engine.subscribe((state) => states.push(state));
-      
+
       await engine.sync();
-      
+
       const finalState = states[states.length - 1];
       expect(finalState?.state).toBe("upToDate");
       expect(finalState?.pendingCount).toBe(0);
-      
+
       unsubscribe();
       engine.stop();
     });
@@ -126,30 +161,42 @@ describe("SyncEngine", () => {
 
       const states: SyncEngineState[] = [];
       const unsubscribe = engine.subscribe((state) => states.push(state));
-      
+
       await engine.sync();
-      
+
       const syncingState = states.find((s) => s.state === "syncing");
       expect(syncingState).toBeDefined();
-      
+
       unsubscribe();
       engine.stop();
     });
   });
 
   describe("retry/backoff behavior", () => {
-    it("calculates exponential backoff delay", () => {
+    it("calculates exponential backoff delay with jitter", () => {
       const engineWithConfig = createSyncEngine({
         tenantId,
         baseRetryDelayMs: 1000,
         maxRetryDelayMs: 60000,
       });
 
-      expect(engineWithConfig.calculateRetryDelay(0)).toBe(1000);
-      expect(engineWithConfig.calculateRetryDelay(1)).toBe(2000);
-      expect(engineWithConfig.calculateRetryDelay(2)).toBe(4000);
-      expect(engineWithConfig.calculateRetryDelay(3)).toBe(8000);
-      
+      // With ±20% jitter, values should be within range
+      const d0 = engineWithConfig.calculateRetryDelay(0);
+      expect(d0).toBeGreaterThanOrEqual(800);
+      expect(d0).toBeLessThanOrEqual(1200);
+
+      const d1 = engineWithConfig.calculateRetryDelay(1);
+      expect(d1).toBeGreaterThanOrEqual(1600);
+      expect(d1).toBeLessThanOrEqual(2400);
+
+      const d2 = engineWithConfig.calculateRetryDelay(2);
+      expect(d2).toBeGreaterThanOrEqual(3200);
+      expect(d2).toBeLessThanOrEqual(4800);
+
+      const d3 = engineWithConfig.calculateRetryDelay(3);
+      expect(d3).toBeGreaterThanOrEqual(6400);
+      expect(d3).toBeLessThanOrEqual(9600);
+
       engineWithConfig.stop();
     });
 
@@ -160,9 +207,13 @@ describe("SyncEngine", () => {
         maxRetryDelayMs: 10000,
       });
 
-      expect(engineWithConfig.calculateRetryDelay(10)).toBe(10000);
-      expect(engineWithConfig.calculateRetryDelay(20)).toBe(10000);
-      
+      expect(engineWithConfig.calculateRetryDelay(10)).toBeLessThanOrEqual(
+        10000
+      );
+      expect(engineWithConfig.calculateRetryDelay(20)).toBeLessThanOrEqual(
+        10000
+      );
+
       engineWithConfig.stop();
     });
   });
@@ -183,7 +234,7 @@ describe("SyncEngine", () => {
         processedAt: null,
         error: null,
       };
-      
+
       mockDbOutbox.toArray.mockResolvedValue([operation]);
       mockFetch.mockResolvedValue({
         ok: true,
@@ -211,7 +262,7 @@ describe("SyncEngine", () => {
       expect(body.operations[0].operationId).toBe("op-id-123");
       expect(body.operations[0].idempotencyKey).toBe("op-id-123");
       expect(body.operations[0].entityId).toBe("entity-1");
-      
+
       engine.stop();
     });
   });
@@ -219,7 +270,7 @@ describe("SyncEngine", () => {
   describe("tenant filtering", () => {
     it("only syncs operations for the current tenant", async () => {
       vi.stubGlobal("navigator", { onLine: true });
-      
+
       const operations = [
         {
           id: "op-1",
@@ -248,7 +299,7 @@ describe("SyncEngine", () => {
           error: null,
         },
       ];
-      
+
       mockDbOutbox.toArray.mockResolvedValue(operations);
       mockFetch.mockResolvedValue({
         ok: true,
@@ -267,7 +318,7 @@ describe("SyncEngine", () => {
       const body = JSON.parse(callArgs[1].body as string);
       expect(body.operations).toHaveLength(1);
       expect(body.operations[0].operationId).toBe("op-1");
-      
+
       engine.stop();
     });
   });
@@ -297,12 +348,12 @@ describe("SyncEngine", () => {
 
       const states: SyncEngineState[] = [];
       const unsubscribe = engine.subscribe((state) => states.push(state));
-      
+
       await engine.sync();
-      
+
       const errorState = states.find((s) => s.state === "error");
       expect(errorState?.lastError).toContain("Rate limited");
-      
+
       unsubscribe();
       engine.stop();
     });
