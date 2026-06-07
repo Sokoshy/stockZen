@@ -241,7 +241,7 @@ describe("E2E - Offline edit/delete flow", () => {
       )
     ).toBe(true);
 
-    await restoreProduct(created.id);
+    await restoreProduct(created.id, TENANT_ID);
 
     localProducts = await getLocalProducts(TENANT_ID);
     expect(localProducts).toHaveLength(1);

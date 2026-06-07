@@ -111,7 +111,7 @@ export function useSyncStatus(options: UseSyncStatusOptions): UseSyncStatusRetur
 
   const retryFailed = useCallback(
     async (operationId: string): Promise<RetryPermanentlyFailedResult> => {
-      const result = await retryPermanentlyFailedOperation(operationId);
+      const result = await retryPermanentlyFailedOperation(operationId, tenantId);
       await refreshPermanentlyFailed();
       return result;
     },
@@ -120,7 +120,7 @@ export function useSyncStatus(options: UseSyncStatusOptions): UseSyncStatusRetur
 
   const dismissFailed = useCallback(
     async (operationId: string): Promise<void> => {
-      await dismissPermanentlyFailedOperation(operationId);
+      await dismissPermanentlyFailedOperation(operationId, tenantId);
       await refreshPermanentlyFailed();
     },
     [refreshPermanentlyFailed]

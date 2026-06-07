@@ -105,7 +105,7 @@ describe("restoreProduct (PR #15 A3 / B2)", () => {
       status: "pending",
     });
 
-    await restoreProduct("product-1");
+    await restoreProduct("product-1", "tenant-1");
 
     expect(transactionMock).toHaveBeenCalledTimes(1);
     expect(transactionMock).toHaveBeenCalledWith(
@@ -122,7 +122,7 @@ describe("restoreProduct (PR #15 A3 / B2)", () => {
   });
 
   it("throws when the product does not exist", async () => {
-    await expect(restoreProduct("missing")).rejects.toThrow(
+    await expect(restoreProduct("missing", "tenant-1")).rejects.toThrow(
       "Product not found in local database"
     );
   });
@@ -148,7 +148,7 @@ describe("restoreProduct (PR #15 A3 / B2)", () => {
       deletedAt: "2026-01-01T00:00:00.000Z",
     });
 
-    await expect(restoreProduct("product-1")).resolves.toBeUndefined();
+    await expect(restoreProduct("product-1", "tenant-X")).resolves.toBeUndefined();
   });
 
   it("the products.update and outbox delete both happen inside the transaction body", async () => {
@@ -193,7 +193,7 @@ describe("restoreProduct (PR #15 A3 / B2)", () => {
         ranOutboxDelete = true;
       }) as typeof outboxStore.delete);
 
-    await restoreProduct("product-1");
+    await restoreProduct("product-1", "tenant-1");
 
     expect(ranProductsUpdate).toBe(true);
     expect(ranOutboxDelete).toBe(true);

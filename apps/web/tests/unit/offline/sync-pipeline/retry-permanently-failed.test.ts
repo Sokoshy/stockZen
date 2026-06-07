@@ -255,13 +255,13 @@ describe("retryPermanentlyFailedOperation (PR #15 C)", () => {
   it("throws if the op is not in permanently_failed status", async () => {
     outboxStore.ops.set("op-1", buildPermanentlyFailedOp({ status: "pending" }));
 
-    await expect(retryPermanentlyFailedOperation("op-1")).rejects.toThrow(
+    await expect(retryPermanentlyFailedOperation("op-1", TENANT_ID)).rejects.toThrow(
       /expected "permanently_failed"/
     );
   });
 
   it("throws if the op does not exist", async () => {
-    await expect(retryPermanentlyFailedOperation("missing")).rejects.toThrow(
+    await expect(retryPermanentlyFailedOperation("missing", TENANT_ID)).rejects.toThrow(
       /Outbox operation not found/
     );
   });
@@ -303,7 +303,7 @@ describe("retryPermanentlyFailedOperation (PR #15 C)", () => {
       }),
     });
 
-    const result = await retryPermanentlyFailedOperation("op-1");
+    const result = await retryPermanentlyFailedOperation("op-1", TENANT_ID);
 
     expect(result.outcome).toBe("completed");
     const op = outboxStore.ops.get("op-1");
@@ -349,7 +349,7 @@ describe("retryPermanentlyFailedOperation (PR #15 C)", () => {
       }),
     });
 
-    const result = await retryPermanentlyFailedOperation("op-1");
+    const result = await retryPermanentlyFailedOperation("op-1", TENANT_ID);
 
     expect(result.outcome).toBe("deleted");
     expect(outboxStore.ops.has("op-1")).toBe(false);
@@ -363,7 +363,7 @@ describe("retryPermanentlyFailedOperation (PR #15 C)", () => {
 
     fetchMock.mockRejectedValueOnce(new Error("Network unreachable"));
 
-    const result = await retryPermanentlyFailedOperation("op-1");
+    const result = await retryPermanentlyFailedOperation("op-1", TENANT_ID);
 
     // Network blip: the engine marks the op "failed" (not "deleted")
     // because the failure is not terminal. The retry is best-effort.
@@ -414,7 +414,7 @@ describe("dismissPermanentlyFailedOperation (PR #15 C)", () => {
       deletedAt: null,
     });
 
-    await dismissPermanentlyFailedOperation("op-1");
+    await dismissPermanentlyFailedOperation("op-1", TENANT_ID);
 
     expect(outboxStore.ops.has("op-1")).toBe(false);
     expect(productStore.products.has("product-1")).toBe(false);
@@ -459,7 +459,7 @@ describe("dismissPermanentlyFailedOperation (PR #15 C)", () => {
       deletedAt: null,
     });
 
-    await dismissPermanentlyFailedOperation("op-1");
+    await dismissPermanentlyFailedOperation("op-1", TENANT_ID);
 
     expect(outboxStore.ops.has("op-1")).toBe(false);
     const reverted = productStore.products.get("product-1");
@@ -501,7 +501,7 @@ describe("dismissPermanentlyFailedOperation (PR #15 C)", () => {
       deletedAt: new Date().toISOString(),
     });
 
-    await dismissPermanentlyFailedOperation("op-1");
+    await dismissPermanentlyFailedOperation("op-1", TENANT_ID);
 
     expect(outboxStore.ops.has("op-1")).toBe(false);
     const revived = productStore.products.get("product-1");
@@ -512,13 +512,13 @@ describe("dismissPermanentlyFailedOperation (PR #15 C)", () => {
   it("throws if the op is not in permanently_failed status", async () => {
     outboxStore.ops.set("op-1", buildPermanentlyFailedOp({ status: "failed" }));
 
-    await expect(dismissPermanentlyFailedOperation("op-1")).rejects.toThrow(
+    await expect(dismissPermanentlyFailedOperation("op-1", TENANT_ID)).rejects.toThrow(
       /expected "permanently_failed"/
     );
   });
 
   it("is a noop if the op does not exist", async () => {
-    await expect(dismissPermanentlyFailedOperation("missing")).resolves.toBeUndefined();
+    await expect(dismissPermanentlyFailedOperation("missing", TENANT_ID)).resolves.toBeUndefined();
   });
 });
 

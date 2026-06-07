@@ -345,7 +345,7 @@ describe("E2E - Permanently failed retry (PR #15 C8)", () => {
   it("scenario 1: retry with a healthy server -> op completed, local entity preserved", async () => {
     mockServerSuccess();
 
-    const result = await retryPermanentlyFailedOperation("op-1");
+    const result = await retryPermanentlyFailedOperation("op-1", TENANT_ID);
 
     expect(result.outcome).toBe("completed");
     expect(hoisted.outbox.has("op-1")).toBe(true);
@@ -365,7 +365,7 @@ describe("E2E - Permanently failed retry (PR #15 C8)", () => {
   it("scenario 2: retry with a still-broken server -> outbox deleted + local entity removed", async () => {
     mockServerValidationError();
 
-    const result = await retryPermanentlyFailedOperation("op-1");
+    const result = await retryPermanentlyFailedOperation("op-1", TENANT_ID);
 
     expect(result.outcome).toBe("deleted");
     expect(hoisted.outbox.has("op-1")).toBe(false);
@@ -378,7 +378,7 @@ describe("E2E - Permanently failed retry (PR #15 C8)", () => {
   });
 
   it("scenario 3: dismiss -> outbox deleted + local entity cleaned up, no sync triggered", async () => {
-    await dismissPermanentlyFailedOperation("op-1");
+    await dismissPermanentlyFailedOperation("op-1", TENANT_ID);
 
     expect(hoisted.outbox.has("op-1")).toBe(false);
     expect(hoisted.products.has("product-1")).toBe(false);
@@ -388,7 +388,7 @@ describe("E2E - Permanently failed retry (PR #15 C8)", () => {
 
   it("retry guard: throws when the op is in a different status", async () => {
     hoisted.outbox.set("op-1", { ...baseOp, status: "pending" });
-    await expect(retryPermanentlyFailedOperation("op-1")).rejects.toThrow(
+    await expect(retryPermanentlyFailedOperation("op-1", TENANT_ID)).rejects.toThrow(
       /expected "permanently_failed"/
     );
   });

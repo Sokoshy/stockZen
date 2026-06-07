@@ -217,7 +217,7 @@ describe("restoreProduct", () => {
     ]);
     mockDb.outbox.delete.mockResolvedValue(undefined);
 
-    await restoreProduct("product-1");
+    await restoreProduct("product-1", "tenant-1");
 
     expect(mockDb.transaction).toHaveBeenCalledTimes(1);
     expect(mockDb.transaction).toHaveBeenCalledWith(

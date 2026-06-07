@@ -141,9 +141,18 @@ export async function enqueueOperation(input: EnqueueOperationInput): Promise<st
   return operationId;
 }
 
-export async function getPendingOperations(): Promise<OutboxOperation[]> {
-  const all = await db.outbox.toArray();
-  return all.filter((op) => op.status === "pending" || op.status === "failed");
+export async function getPendingOperations(
+  tenantId: string
+): Promise<OutboxOperation[]> {
+  const pending = await db.outbox
+    .where("[tenantId+status]")
+    .equals([tenantId, "pending"])
+    .toArray();
+  const failed = await db.outbox
+    .where("[tenantId+status]")
+    .equals([tenantId, "failed"])
+    .toArray();
+  return [...pending, ...failed];
 }
 
 /**
@@ -407,8 +416,13 @@ export async function getPendingSyncProducts(
 
 export async function updateProductSyncStatus(
   productId: string,
-  status: "pending" | "synced" | "failed"
+  status: "pending" | "synced" | "failed",
+  tenantId: string
 ): Promise<void> {
+  const product = await db.products.get(productId);
+  if (product && product.tenantId !== tenantId) {
+    throw new Error("Product does not belong to the provided tenant");
+  }
   await db.products.update(productId, {
     syncStatus: status,
     updatedAt: new Date().toISOString(),
@@ -631,7 +645,7 @@ export async function deleteProductOffline(
  */
 export async function restoreProduct(
   productId: string,
-  tenantId?: string
+  tenantId: string
 ): Promise<void> {
   const now = new Date().toISOString();
 
@@ -641,7 +655,7 @@ export async function restoreProduct(
       throw new Error("Product not found in local database");
     }
 
-    if (tenantId !== undefined && existingProduct.tenantId !== tenantId) {
+    if (existingProduct.tenantId !== tenantId) {
       throw new Error("Product does not belong to the provided tenant");
     }
 
@@ -902,7 +916,8 @@ export async function getPermanentlyFailedOperations(
       .where("[tenantId+status]")
       .equals([tenantId, "permanently_failed"])
       .toArray();
-  } catch {
+  } catch (err) {
+    console.warn("[getPermanentlyFailedOperations] Indexed query failed, falling back to full scan:", err);
     rows = [];
   }
 
@@ -956,13 +971,18 @@ export async function cleanupLocalEntityForOp(
 ): Promise<void> {
   try {
     if (op.entityType === "product") {
+      const existing = await db.products.get(op.entityId);
+      if (existing && existing.tenantId !== op.tenantId) {
+        // Cross-tenant guard: do not clean up entities belonging to another tenant
+        return;
+      }
+
       if (op.operationType === "create") {
         await db.products.delete(op.entityId);
         return;
       }
 
       if (op.operationType === "delete") {
-        const existing = await db.products.get(op.entityId);
         if (existing) {
           await db.products.update(op.entityId, {
             deletedAt: null,
@@ -976,8 +996,8 @@ export async function cleanupLocalEntityForOp(
       // operationType === "update"
       const original = (op.payload as { originalProduct?: Partial<LocalProduct> })
         .originalProduct;
-      const existing = await db.products.get(op.entityId);
-      if (!existing) {
+      const existingForUpdate = await db.products.get(op.entityId);
+      if (!existingForUpdate) {
         return;
       }
 
@@ -994,10 +1014,10 @@ export async function cleanupLocalEntityForOp(
           patch.sku = (original.sku as string | null) ?? null;
         }
         if (typeof original.category === "string" || original.category === null) {
-          patch.category = (original.category as string | null) ?? existing.category;
+          patch.category = (original.category as string | null) ?? existingForUpdate.category;
         }
         if (typeof original.unit === "string" || original.unit === null) {
-          patch.unit = (original.unit as string | null) ?? existing.unit;
+          patch.unit = (original.unit as string | null) ?? existingForUpdate.unit;
         }
         if (original.barcode !== undefined) {
           patch.barcode = (original.barcode as string | null) ?? null;
@@ -1019,7 +1039,7 @@ export async function cleanupLocalEntityForOp(
           patch.customAttentionThreshold =
             (original.customAttentionThreshold as number | null) ?? null;
         }
-        await db.products.put({ ...existing, ...patch });
+        await db.products.put({ ...existingForUpdate, ...patch });
       } else {
         // No snapshot to revert to — bail to hard-delete to keep state consistent.
         await db.products.delete(op.entityId);
@@ -1028,6 +1048,12 @@ export async function cleanupLocalEntityForOp(
     }
 
     if (op.entityType === "stockMovement") {
+      // Tenant guard: verify the movement belongs to the same tenant
+      const existingMovement = await db.stockMovements.get(op.entityId);
+      if (existingMovement && existingMovement.tenantId !== op.tenantId) {
+        return;
+      }
+
       if (op.operationType === "create") {
         await db.stockMovements.delete(op.entityId);
         // Recompute the product quantity from the remaining (synced) movements.
@@ -1038,7 +1064,9 @@ export async function cleanupLocalEntityForOp(
             .equals(productId)
             .toArray();
           const qty = remaining.reduce((total, movement) => {
-            if (movement.syncStatus === "synced") {
+            // Include pending and processing movements in the recomputation
+            // to preserve offline work the user hasn't abandoned.
+            if (movement.syncStatus === "synced" || movement.syncStatus === "pending" || movement.syncStatus === "processing") {
               return total + (movement.type === "entry" ? movement.quantity : -movement.quantity);
             }
             return total;
@@ -1075,7 +1103,8 @@ export async function cleanupLocalEntityForOp(
  * Throws if the op is not in `permanently_failed` status.
  */
 export async function retryPermanentlyFailedOperation(
-  operationId: string
+  operationId: string,
+  tenantId: string
 ): Promise<RetryPermanentlyFailedResult> {
   const op = await db.outbox.get(operationId);
   if (!op) {
@@ -1088,8 +1117,12 @@ export async function retryPermanentlyFailedOperation(
     );
   }
 
-  const tenantId = op.tenantId ?? (op.payload as { tenantId?: string }).tenantId;
-  if (!tenantId) {
+  const opTenantId = op.tenantId ?? (op.payload as { tenantId?: string }).tenantId;
+  if (opTenantId !== tenantId) {
+    throw new Error("Operation does not belong to the provided tenant");
+  }
+
+  if (!opTenantId) {
     throw new Error("Cannot retry operation without a tenantId");
   }
 
@@ -1125,7 +1158,8 @@ export async function retryPermanentlyFailedOperation(
  * permanently-failed list.
  */
 export async function dismissPermanentlyFailedOperation(
-  operationId: string
+  operationId: string,
+  tenantId: string
 ): Promise<void> {
   const op = await db.outbox.get(operationId);
   if (!op) {
@@ -1137,6 +1171,11 @@ export async function dismissPermanentlyFailedOperation(
     );
   }
 
+  const opTenantId = op.tenantId ?? (op.payload as { tenantId?: string }).tenantId;
+  if (opTenantId !== tenantId) {
+    throw new Error("Operation does not belong to the provided tenant");
+  }
+
   await db.transaction("rw", db.products, db.stockMovements, db.outbox, async () => {
     await cleanupLocalEntityForOp(op);
     await db.outbox.delete(op.id);
@@ -1146,7 +1185,7 @@ export async function dismissPermanentlyFailedOperation(
 export async function getPendingMovementSyncItems(
   tenantId: string
 ): Promise<PendingMovementSyncItem[]> {
-  const operations = await getPendingOperations();
+  const operations = await getPendingOperations(tenantId);
   const items: PendingMovementSyncItem[] = [];
 
   for (const operation of operations) {
@@ -1609,15 +1648,15 @@ class SyncEngine {
     op: OutboxOperation,
     result: SyncResult
   ): Promise<void> {
-    await markOperationCompleted(
-      op.operationId,
-      result.serverState?.id as string | undefined
-    );
-
     if (op.entityType === "product") {
+      await markOperationCompleted(
+        op.operationId,
+        result.serverState?.id as string | undefined
+      );
       await applyServerProductState(op.entityId, result.serverState);
-      await updateProductSyncStatus(op.entityId, "synced");
+      await updateProductSyncStatus(op.entityId, "synced", op.tenantId);
     } else if (op.entityType === "stockMovement") {
+      // markMovementSynced owns the outbox transition for movements
       await markMovementSynced({
         movementId: op.entityId,
         operationId: op.operationId,
@@ -1630,12 +1669,12 @@ class SyncEngine {
     op: OutboxOperation,
     result: SyncResult
   ): Promise<void> {
-    await markOperationCompleted(op.operationId);
-
     if (op.entityType === "product" && result.serverState) {
+      await markOperationCompleted(op.operationId);
       await applyServerProductState(op.entityId, result.serverState);
-      await updateProductSyncStatus(op.entityId, "synced");
+      await updateProductSyncStatus(op.entityId, "synced", op.tenantId);
     } else if (op.entityType === "stockMovement") {
+      // markMovementSynced owns the outbox transition for movements
       await markMovementSynced({
         movementId: op.entityId,
         operationId: op.operationId,
@@ -1666,15 +1705,15 @@ class SyncEngine {
       return;
     }
 
-    await markOperationFailed(
-      op.operationId,
-      result.message ?? `Permanent failure: ${result.status}`,
-      this.maxRetries
-    );
-
     if (op.entityType === "product") {
-      await updateProductSyncStatus(op.entityId, "failed");
+      await markOperationFailed(
+        op.operationId,
+        result.message ?? `Permanent failure: ${result.status}`,
+        this.maxRetries
+      );
+      await updateProductSyncStatus(op.entityId, "failed", op.tenantId);
     } else if (op.entityType === "stockMovement") {
+      // markMovementSyncFailed owns the outbox transition for movements
       await markMovementSyncFailed({
         movementId: op.entityId,
         operationId: op.operationId,
