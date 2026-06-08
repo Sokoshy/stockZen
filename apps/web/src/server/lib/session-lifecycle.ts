@@ -1,10 +1,14 @@
 import { eq } from "drizzle-orm";
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
 import {
   buildClearSessionCookie,
   buildSessionCookie,
 } from "~/server/better-auth/session-cookie";
 import { session } from "~/server/db/schema";
+import type * as schema from "~/server/db/schema";
+
+type DbClient = PostgresJsDatabase<typeof schema>;
 
 const REMEMBER_ME_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 const DEFAULT_SESSION_TTL_SECONDS = 60 * 30;
@@ -18,16 +22,7 @@ const DEFAULT_SESSION_TTL_SECONDS = 60 * 30;
  * @returns The computed `expiresAt` that the caller should use for the cookie.
  */
 export async function applyRememberMeExtension(
-  db: {
-    update: (table: typeof session) => {
-      set: (values: {
-        expiresAt: Date;
-        updatedAt: Date;
-      }) => {
-        where: (condition: ReturnType<typeof eq>) => Promise<unknown>;
-      };
-    };
-  },
+  db: DbClient,
   currentToken: string | null,
   rememberMe: boolean,
 ): Promise<Date> {
@@ -79,11 +74,7 @@ export function setSessionCookieAfterAuth(
  * clear-cookie header to the response.
  */
 export async function destroySession(
-  db: {
-    delete: (table: typeof session) => {
-      where: (condition: ReturnType<typeof eq>) => Promise<unknown>;
-    };
-  },
+  db: DbClient,
   responseHeaders: Headers,
   currentToken: string | null,
 ): Promise<void> {
@@ -95,15 +86,11 @@ export async function destroySession(
 }
 
 /**
- * Delete all sessions for a given user (e.g. after role revocation or
- * forced logout).
+ * Delete all sessions globally for a given user (e.g. after role revocation
+ * or forced logout). This affects ALL tenants the user belongs to.
  */
-export async function invalidateAllUserSessions(
-  db: {
-    delete: (table: typeof session) => {
-      where: (condition: ReturnType<typeof eq>) => Promise<unknown>;
-    };
-  },
+export async function globallyInvalidateAllUserSessions(
+  db: DbClient,
   userId: string,
 ): Promise<void> {
   await db.delete(session).where(eq(session.userId, userId));

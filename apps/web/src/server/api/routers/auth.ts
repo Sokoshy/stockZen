@@ -56,7 +56,7 @@ import {
 import {
   applyRememberMeExtension,
   destroySession,
-  invalidateAllUserSessions,
+  globallyInvalidateAllUserSessions,
   setSessionCookieAfterAuth,
 } from "~/server/lib/session-lifecycle";
 import {
@@ -530,8 +530,6 @@ export const authRouter = createTRPCRouter({
           rawToken,
           rememberMe,
         );
-
-
 
         const userRecord = await ctx.db.query.user.findFirst({
           columns: {
@@ -1254,7 +1252,7 @@ export const authRouter = createTRPCRouter({
         const shouldInvalidateSessions = isSelfRemoval || !fallbackMembership;
 
         if (shouldInvalidateSessions) {
-          await invalidateAllUserSessions(tx, targetMembershipInTx.userId);
+          await globallyInvalidateAllUserSessions(tx, targetMembershipInTx.userId);
         }
 
         const adminCountAfterRemoval = await countTenantAdmins({ tenantId, db: tx });

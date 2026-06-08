@@ -6,7 +6,8 @@ import { eq } from "drizzle-orm";
 import {
   applyRememberMeExtension,
   destroySession,
-  invalidateAllUserSessions,
+  globallyInvalidateAllUserSessions,
+  setSessionCookieAfterAuth,
 } from "~/server/lib/session-lifecycle";
 import { session } from "~/server/db/schema";
 import {
@@ -21,13 +22,13 @@ import { createTRPCContext } from "~/server/api/trpc";
 const testDb = createTestDb();
 
 /** Create a user and return their id + a helper to insert sessions. */
-async function createTestUser() {
+async function createTestUser(clientIp = "127.0.90.1") {
   const email = generateTestEmail();
   const password = "Password123";
   const tenantName = generateTestTenantName();
 
   const ctx = await createTRPCContext({
-    headers: new Headers({ "x-forwarded-for": "127.0.90.1" }),
+    headers: new Headers({ "x-forwarded-for": clientIp }),
   });
   const caller = createCaller(ctx);
 
@@ -67,6 +68,8 @@ async function insertSession(
 describe("session-lifecycle", () => {
   beforeEach(async () => {
     await cleanDatabase(testDb);
+    // Clear rate limit store to avoid "Too many sign up attempts" across tests
+    (globalThis as unknown as { rateLimitStore?: Map<unknown, unknown> }).rateLimitStore?.clear();
   });
 
   // ─── applyRememberMeExtension ────────────────────────────────────
@@ -130,6 +133,29 @@ describe("session-lifecycle", () => {
       expect(Math.abs(sessionRecord!.expiresAt.getTime() - shortExpiry.getTime())).toBeLessThan(2000);
     });
 
+    it("should not update DB when currentToken is null even with rememberMe true", async () => {
+      const { userId } = await createTestUser();
+      const now = new Date();
+      const shortExpiry = new Date(now.getTime() + 30 * 60 * 1000);
+
+      const token = "token-null-test";
+      await insertSession(userId, token, shortExpiry);
+
+      const result = await applyRememberMeExtension(testDb, null, true);
+
+      // Should still return 30 days expiry for the cookie
+      const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+      expect(result.getTime()).toBeGreaterThanOrEqual(Date.now() + thirtyDaysMs - 60_000);
+      expect(result.getTime()).toBeLessThanOrEqual(Date.now() + thirtyDaysMs + 60_000);
+
+      // DB: the existing session should be unchanged since token was null
+      const sessionRecord = await testDb.query.session.findFirst({
+        where: eq(session.token, token),
+      });
+      expect(sessionRecord).toBeDefined();
+      expect(Math.abs(sessionRecord!.expiresAt.getTime() - shortExpiry.getTime())).toBeLessThan(2000);
+    });
+
     it("should return expiresAt aligned with what the cookie would use", async () => {
       const { userId } = await createTestUser();
       const now = new Date();
@@ -185,9 +211,9 @@ describe("session-lifecycle", () => {
     });
   });
 
-  // ─── invalidateAllUserSessions ───────────────────────────────────
+  // ─── globallyInvalidateAllUserSessions ───────────────────────────
 
-  describe("invalidateAllUserSessions", () => {
+  describe("globallyInvalidateAllUserSessions", () => {
     it("should delete all sessions for the user", async () => {
       const { userId } = await createTestUser();
       const now = new Date();
@@ -203,12 +229,71 @@ describe("session-lifecycle", () => {
       });
       expect(before).toHaveLength(3);
 
-      await invalidateAllUserSessions(testDb, userId);
+      await globallyInvalidateAllUserSessions(testDb, userId);
 
       const after = await testDb.query.session.findMany({
         where: eq(session.userId, userId),
       });
       expect(after).toHaveLength(0);
+    });
+
+    it("should only delete sessions for the target user and leave others intact", async () => {
+      const { userId: userA } = await createTestUser();
+      const { userId: userB } = await createTestUser("127.0.90.2");
+      const now = new Date();
+      const future = new Date(now.getTime() + 60 * 60 * 1000);
+
+      await insertSession(userA, "token-a1", future);
+      await insertSession(userA, "token-a2", future);
+      await insertSession(userB, "token-b1", future);
+      await insertSession(userB, "token-b2", future);
+
+      await globallyInvalidateAllUserSessions(testDb, userA);
+
+      // User A sessions should be gone
+      const sessionsA = await testDb.query.session.findMany({
+        where: eq(session.userId, userA),
+      });
+      expect(sessionsA).toHaveLength(0);
+
+      // User B sessions should still exist
+      const sessionsB = await testDb.query.session.findMany({
+        where: eq(session.userId, userB),
+      });
+      expect(sessionsB).toHaveLength(2);
+    });
+  });
+
+  // ─── setSessionCookieAfterAuth ───────────────────────────────────
+
+  describe("setSessionCookieAfterAuth", () => {
+    it("should append a Set-Cookie header with the token", () => {
+      const headers = new Headers();
+      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+      setSessionCookieAfterAuth(headers, "my-token", true, expiresAt);
+
+      const setCookie = headers.get("Set-Cookie");
+      expect(setCookie).toContain("__session=my-token");
+      expect(setCookie).toContain("HttpOnly");
+      expect(setCookie).toContain("SameSite=Lax");
+      // Secure flag is only set in production; test env omits it
+    });
+
+    it("should use session expires for rememberMe and omit for non-rememberMe", () => {
+      const headersRemember = new Headers();
+      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+      setSessionCookieAfterAuth(headersRemember, "token-1", true, expiresAt);
+      const cookieRemember = headersRemember.get("Set-Cookie");
+      expect(cookieRemember).toContain("Expires=");
+
+      const headersNoRemember = new Headers();
+      setSessionCookieAfterAuth(headersNoRemember, "token-2", false, expiresAt);
+      const cookieNoRemember = headersNoRemember.get("Set-Cookie");
+      // Session cookie (no rememberMe) should NOT have Expires/Max-Age
+      expect(cookieNoRemember).not.toContain("Expires=");
+      expect(cookieNoRemember).not.toContain("Max-Age=");
     });
   });
 });

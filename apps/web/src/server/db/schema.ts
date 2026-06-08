@@ -47,7 +47,9 @@ export const session = pgTable("session", {
   userId: text("user_id")
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
-});
+}, (table) => [
+  index("idx_session_user_id").on(table.userId),
+]);
 
 export const account = pgTable("account", {
   id: text("id").primaryKey(),
