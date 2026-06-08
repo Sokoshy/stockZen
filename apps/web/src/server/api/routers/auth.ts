@@ -54,6 +54,12 @@ import {
   extractSessionToken,
 } from "~/server/better-auth/session-cookie";
 import {
+  applyRememberMeExtension,
+  destroySession,
+  invalidateAllUserSessions,
+  setSessionCookieAfterAuth,
+} from "~/server/lib/session-lifecycle";
+import {
   extractErrorMessage,
   isInvalidResetTokenError,
 } from "~/server/better-auth/password-reset-errors";
@@ -76,8 +82,6 @@ import {
   lockTenantSubscription,
 } from "~/server/services/subscription-service";
 
-const DEFAULT_SESSION_TTL_SECONDS = 60 * 30;
-const REMEMBER_ME_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 const GENERIC_LOGIN_ERROR = "Invalid email or password";
 const GENERIC_PASSWORD_RESET_REQUEST_RESPONSE =
   "If this email exists in our system, check your email for the reset link";
@@ -110,19 +114,6 @@ function getSessionTokenFromSetCookie(setCookie: string): string | null {
   return decodeURIComponent(match[1]);
 }
 
-function getSessionTokenFromCookieHeader(cookieHeader: string | null): string | null {
-  if (!cookieHeader) {
-    return null;
-  }
-
-  const match = cookieHeader.match(/(?:^|;\s*)__session=([^;]+)/i);
-  if (!match?.[1]) {
-    return null;
-  }
-
-  return decodeURIComponent(match[1]);
-}
-
 function extractSetCookieHeaders(result: unknown): string[] {
   if (!result || typeof result !== "object" || !("headers" in result)) {
     return [];
@@ -140,6 +131,19 @@ function extractSetCookieHeaders(result: unknown): string[] {
 
   const single = headers.get("set-cookie");
   return single ? splitCombinedSetCookie(single) : [];
+}
+
+function getSessionTokenFromCookieHeader(cookieHeader: string | null): string | null {
+  if (!cookieHeader) {
+    return null;
+  }
+
+  const match = cookieHeader.match(/(?:^|;\s*)__session=([^;]+)/i);
+  if (!match?.[1]) {
+    return null;
+  }
+
+  return decodeURIComponent(match[1]);
 }
 
 function assertTenantId(tenantId: string | null): string {
@@ -502,18 +506,32 @@ export const authRouter = createTRPCRouter({
           throw new TRPCError({ code: "UNAUTHORIZED", message: GENERIC_LOGIN_ERROR });
         }
 
-        const sessionTtl = rememberMe ? REMEMBER_ME_SESSION_TTL_SECONDS : DEFAULT_SESSION_TTL_SECONDS;
-        const sessionExpiresAt = new Date(Date.now() + sessionTtl * 1000);
+        // Extract token from the Set-Cookie header in Better Auth's response
+        const setCookieHeaders = extractSetCookieHeaders(betterAuthResult);
+        const signedToken =
+          setCookieHeaders
+            .map((headerValue) => getSessionTokenFromSetCookie(headerValue))
+            .find((value): value is string => Boolean(value)) ?? null;
 
-        if (rememberMe) {
-          await ctx.db
-            .update(session)
-            .set({
-              expiresAt: sessionExpiresAt,
-              updatedAt: new Date(),
-            })
-            .where(eq(session.userId, signInResponse.user.id));
+        if (!signedToken) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Failed to establish session cookie after login.",
+          });
         }
+
+        // Better Auth signs the cookie token (rawToken.signature) but stores
+        // only the raw token in the DB.  Extract the raw part so we can
+        // match it against the session row.
+        const rawToken = signedToken.split(".")[0] ?? signedToken;
+
+        const sessionExpiresAt = await applyRememberMeExtension(
+          ctx.db,
+          rawToken,
+          rememberMe,
+        );
+
+
 
         const userRecord = await ctx.db.query.user.findFirst({
           columns: {
@@ -532,26 +550,11 @@ export const authRouter = createTRPCRouter({
           });
         }
 
-        const setCookieHeaders = extractSetCookieHeaders(betterAuthResult);
-        const cookieSessionToken =
-          setCookieHeaders
-            .map((headerValue) => getSessionTokenFromSetCookie(headerValue))
-            .find((value): value is string => Boolean(value)) ?? null;
-
-        if (!cookieSessionToken) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: "Failed to establish session cookie after login.",
-          });
-        }
-
-        ctx.responseHeaders.append(
-          "Set-Cookie",
-          buildSessionCookie({
-            token: cookieSessionToken,
-            expiresAt: rememberMe ? sessionExpiresAt : undefined,
-            persistent: rememberMe,
-          })
+        setSessionCookieAfterAuth(
+          ctx.responseHeaders,
+          signedToken,
+          rememberMe,
+          sessionExpiresAt,
         );
 
         logger.info(
@@ -805,9 +808,7 @@ export const authRouter = createTRPCRouter({
         headers: ctx.headers,
       });
 
-      if (currentToken) {
-        await ctx.db.delete(session).where(eq(session.token, currentToken));
-      }
+      await destroySession(ctx.db, ctx.responseHeaders, currentToken);
     } catch (error) {
       logger.warn(
         {
@@ -822,8 +823,6 @@ export const authRouter = createTRPCRouter({
         message: "Failed to log out",
       });
     }
-
-    ctx.responseHeaders.append("Set-Cookie", buildClearSessionCookie());
 
     logger.info(
       {
@@ -1255,7 +1254,7 @@ export const authRouter = createTRPCRouter({
         const shouldInvalidateSessions = isSelfRemoval || !fallbackMembership;
 
         if (shouldInvalidateSessions) {
-          await tx.delete(session).where(eq(session.userId, targetMembershipInTx.userId));
+          await invalidateAllUserSessions(tx, targetMembershipInTx.userId);
         }
 
         const adminCountAfterRemoval = await countTenantAdmins({ tenantId, db: tx });
