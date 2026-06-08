@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { products, session, user } from "~/server/db/schema";
-import { addUserToTenantWithRole, cleanTestDatabase, createTestTenant, createTenantContext, testDb } from "../helpers/tenant-test-factories";
+import { addUserToTenantWithRole, cleanTestDatabase, createTestTenant, createTenantContext, setTestTenantContext, testDb } from "../helpers/tenant-test-factories";
 
 describe("Tenant Isolation - Anti-Leak Tests", () => {
   beforeEach(async () => {
@@ -187,11 +187,15 @@ describe("Tenant Isolation - Anti-Leak Tests", () => {
 
       expect(created.tenantId).toBe(tenantB.tenantId);
 
+      // Set context to tenantA so RLS allows reading tenantA's products
+      await setTestTenantContext(tenantA.tenantId);
       const tenantAProducts = await testDb.query.products.findMany({
         where: eq(products.tenantId, tenantA.tenantId),
       });
       expect(tenantAProducts.length).toBe(0);
 
+      // Set context to tenantB so RLS allows reading tenantB's products
+      await setTestTenantContext(tenantB.tenantId);
       const tenantBProducts = await testDb.query.products.findMany({
         where: eq(products.tenantId, tenantB.tenantId),
       });
@@ -222,7 +226,13 @@ describe("Tenant Isolation - Anti-Leak Tests", () => {
         quantity: index + 1,
       }));
 
-      await testDb.insert(products).values([...tenantASeed, ...tenantBSeed]);
+      // Set context to tenantA so RLS allows inserting tenantA's products
+      await setTestTenantContext(tenantA.tenantId);
+      await testDb.insert(products).values(tenantASeed);
+
+      // Set context to tenantB so RLS allows inserting tenantB's products
+      await setTestTenantContext(tenantB.tenantId);
+      await testDb.insert(products).values(tenantBSeed);
 
       const listA = await contextA.caller.products.list();
       expect(listA.products).toHaveLength(120);

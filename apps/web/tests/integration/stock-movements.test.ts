@@ -9,8 +9,10 @@ import {
   cleanTestDatabase,
   createTenantContext,
   createTestTenant,
+  setTestTenantContext,
   testDb,
 } from "../helpers/tenant-test-factories";
+import { withTenantContext } from "../helpers/with-tenant-context";
 
 describe("Stock movements API", () => {
   beforeEach(async () => {
@@ -47,6 +49,8 @@ describe("Stock movements API", () => {
     const admin = await createTestTenant();
     const manager = await addUserToTenantWithRole(admin.tenantId, "Manager");
     const operator = await addUserToTenantWithRole(admin.tenantId, "Operator");
+    // Reset context: addUserToTenantWithRole switches it to a temp tenant
+    await setTestTenantContext(admin.tenantId);
 
     const adminCtx = await createTenantContext(admin);
     const managerCtx = await createTenantContext(manager);
@@ -78,19 +82,22 @@ describe("Stock movements API", () => {
       quantity: 2,
     });
 
-    const product = await testDb.query.products.findFirst({
-      where: and(eq(products.id, createdProduct.id), eq(products.tenantId, admin.tenantId)),
+    const { product, movements } = await withTenantContext(testDb, admin.tenantId, async () => {
+      const product = await testDb.query.products.findFirst({
+        where: and(eq(products.id, createdProduct.id), eq(products.tenantId, admin.tenantId)),
+      });
+
+      const movements = await testDb.query.stockMovements.findMany({
+        where: and(
+          eq(stockMovements.tenantId, admin.tenantId),
+          eq(stockMovements.productId, createdProduct.id)
+        ),
+      });
+
+      return { product, movements };
     });
 
     expect(product?.quantity).toBe(14);
-
-    const movements = await testDb.query.stockMovements.findMany({
-      where: and(
-        eq(stockMovements.tenantId, admin.tenantId),
-        eq(stockMovements.productId, createdProduct.id)
-      ),
-    });
-
     expect(movements).toHaveLength(3);
     },
     20000
@@ -545,6 +552,8 @@ describe("Stock movements API", () => {
       const admin = await createTestTenant();
       const manager = await addUserToTenantWithRole(admin.tenantId, "Manager");
       const operator = await addUserToTenantWithRole(admin.tenantId, "Operator");
+      // Reset context: addUserToTenantWithRole switches it to a temp tenant
+      await setTestTenantContext(admin.tenantId);
 
       const adminCtx = await createTenantContext(admin);
       const managerCtx = await createTenantContext(manager);

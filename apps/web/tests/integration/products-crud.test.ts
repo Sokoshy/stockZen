@@ -11,6 +11,7 @@ import {
   createTestTenant,
   testDb,
 } from "../helpers/tenant-test-factories";
+import { withTenantContext } from "../helpers/with-tenant-context";
 
 describe("Products CRUD", () => {
   beforeEach(async () => {
@@ -58,12 +59,14 @@ describe("Products CRUD", () => {
       quantity: 10,
     });
 
-    const createdAlert = await testDb.query.alerts.findFirst({
-      where: and(
-        eq(alerts.tenantId, admin.tenantId),
-        eq(alerts.productId, created.id),
-        eq(alerts.status, "active")
-      ),
+    const createdAlert = await withTenantContext(testDb, admin.tenantId, async () => {
+      return await testDb.query.alerts.findFirst({
+        where: and(
+          eq(alerts.tenantId, admin.tenantId),
+          eq(alerts.productId, created.id),
+          eq(alerts.status, "active")
+        ),
+      });
     });
 
     expect(createdAlert).toBeDefined();

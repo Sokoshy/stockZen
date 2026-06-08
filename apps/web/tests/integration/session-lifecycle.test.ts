@@ -280,7 +280,7 @@ describe("session-lifecycle", () => {
       // Secure flag is only set in production; test env omits it
     });
 
-    it("should use session expires for rememberMe and omit for non-rememberMe", () => {
+    it("should use session expires for rememberMe and short Max-Age for non-rememberMe", () => {
       const headersRemember = new Headers();
       const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
@@ -291,9 +291,9 @@ describe("session-lifecycle", () => {
       const headersNoRemember = new Headers();
       setSessionCookieAfterAuth(headersNoRemember, "token-2", false, expiresAt);
       const cookieNoRemember = headersNoRemember.get("Set-Cookie");
-      // Session cookie (no rememberMe) should NOT have Expires/Max-Age
+      // Non-rememberMe sessions should have Max-Age=1800 (30 min) to align with DB TTL
+      expect(cookieNoRemember).toContain("Max-Age=1800");
       expect(cookieNoRemember).not.toContain("Expires=");
-      expect(cookieNoRemember).not.toContain("Max-Age=");
     });
   });
 });

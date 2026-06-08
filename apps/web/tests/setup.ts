@@ -1,5 +1,4 @@
 process.env.SKIP_ENV_VALIDATION = "true";
-process.env.SKIP_ALERT_RECOMPUTATION = "true";
 process.env.BETTER_AUTH_SECRET =
   process.env.BETTER_AUTH_SECRET ?? "test-secret-32-characters-long";
 process.env.BETTER_AUTH_BASE_URL =

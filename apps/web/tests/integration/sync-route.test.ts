@@ -4,7 +4,8 @@ import { POST } from "~/app/api/sync/route";
 import { auth } from "~/server/better-auth";
 import { db } from "~/server/db";
 import { alerts, products, stockMovements, tenantMemberships, tenants, user } from "~/server/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
+import { withTenantContext } from "../helpers/with-tenant-context";
 
 vi.mock("~/server/better-auth", () => ({
   auth: {
@@ -88,6 +89,8 @@ describe("POST /api/sync", () => {
     vi.clearAllMocks();
     
     tenantId = await createTestTenant();
+    // Set tenant context on db so FORCE ROW LEVEL SECURITY allows queries
+    await db.execute(sql`select set_config('app.tenant_id', ${tenantId}, false)`);
     userId = await createTestUser(tenantId);
     productId = await createTestProduct(tenantId);
   });
@@ -138,6 +141,8 @@ describe("POST /api/sync", () => {
 
   it("returns 403 when operation tenant mismatches authenticated tenant", async () => {
     const otherTenantId = await createTestTenant();
+    // Restore tenant context to the primary tenant (createTestTenant overwrites it)
+    await db.execute(sql`select set_config('app.tenant_id', ${tenantId}, false)`);
 
     vi.mocked(auth.api.getSession).mockResolvedValue(mockSession(userId, `test-${userId}@example.com`, tenantId));
 
@@ -222,29 +227,33 @@ describe("POST /api/sync", () => {
     expect(body.results[0].status).toBe("success");
     expect(body.results[0].serverState?.id).toBe(operationId);
 
-    const syncedProduct = await db.query.products.findFirst({
-      where: eq(products.id, operationId),
+    const syncedProduct = await withTenantContext(db, tenantId, async () => {
+      return await db.query.products.findFirst({
+        where: eq(products.id, operationId),
+      });
     });
     expect(syncedProduct).toBeDefined();
     expect(syncedProduct?.name).toBe("Synced Product");
   });
 
   it("rejects synced product creation when the tenant is already at the plan limit", async () => {
-    await db
-      .update(tenants)
-      .set({ subscriptionPlan: "Free" })
-      .where(eq(tenants.id, tenantId));
+    await withTenantContext(db, tenantId, async () => {
+      await db
+        .update(tenants)
+        .set({ subscriptionPlan: "Free" })
+        .where(eq(tenants.id, tenantId));
 
-    await db.insert(products).values(
-      Array.from({ length: 20 }, (_, index) => ({
-        tenantId,
-        name: `Existing Product ${index + 1}`,
-        category: "Test",
-        unit: "pcs",
-        price: "2.00",
-        quantity: 1,
-      }))
-    );
+      await db.insert(products).values(
+        Array.from({ length: 20 }, (_, index) => ({
+          tenantId,
+          name: `Existing Product ${index + 1}`,
+          category: "Test",
+          unit: "pcs",
+          price: "2.00",
+          quantity: 1,
+        }))
+      );
+    });
 
     vi.mocked(auth.api.getSession).mockResolvedValue(mockSession(userId, `test-${userId}@example.com`, tenantId));
 
@@ -279,8 +288,10 @@ describe("POST /api/sync", () => {
     expect(body.results[0].status).toBe("validation_error");
     expect(body.results[0].message).toContain("Upgrade in Billing settings: /settings/billing");
 
-    const syncedProduct = await db.query.products.findFirst({
-      where: eq(products.id, operationId),
+    const syncedProduct = await withTenantContext(db, tenantId, async () => {
+      return await db.query.products.findFirst({
+        where: eq(products.id, operationId),
+      });
     });
     expect(syncedProduct).toBeUndefined();
   });
@@ -319,40 +330,44 @@ describe("POST /api/sync", () => {
     const body = await response.json();
     expect(body.results[0].status).toBe("success");
 
-    const movements = await db.query.stockMovements.findMany({
-      where: eq(stockMovements.idempotencyKey, idempotencyKey),
+    const { movements, movementsAfter } = await withTenantContext(db, tenantId, async () => {
+      const movements = await db.query.stockMovements.findMany({
+        where: eq(stockMovements.idempotencyKey, idempotencyKey),
+      });
+
+      const request2 = new NextRequest("http://localhost/api/sync", {
+        method: "POST",
+        headers: new Headers({ "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          operations: [{
+            operationId,
+            idempotencyKey: operationId,
+            entityId: crypto.randomUUID(),
+            entityType: "stockMovement",
+            operationType: "create",
+            tenantId,
+            payload: {
+              tenantId,
+              productId,
+              type: "entry",
+              quantity: 100,
+              idempotencyKey,
+            },
+          }],
+        }),
+      });
+
+      const response2 = await POST(request2);
+      const body2 = await response2.json();
+      expect(body2.results[0].status).toBe("duplicate");
+
+      const movementsAfter = await db.query.stockMovements.findMany({
+        where: eq(stockMovements.idempotencyKey, idempotencyKey),
+      });
+
+      return { movements, movementsAfter };
     });
     expect(movements).toHaveLength(1);
-
-    const request2 = new NextRequest("http://localhost/api/sync", {
-      method: "POST",
-      headers: new Headers({ "Content-Type": "application/json" }),
-      body: JSON.stringify({
-        operations: [{
-          operationId,
-          idempotencyKey: operationId,
-          entityId: crypto.randomUUID(),
-          entityType: "stockMovement",
-          operationType: "create",
-          tenantId,
-          payload: {
-            tenantId,
-            productId,
-            type: "entry",
-            quantity: 100,
-            idempotencyKey,
-          },
-        }],
-      }),
-    });
-
-    const response2 = await POST(request2);
-    const body2 = await response2.json();
-    expect(body2.results[0].status).toBe("duplicate");
-
-    const movementsAfter = await db.query.stockMovements.findMany({
-      where: eq(stockMovements.idempotencyKey, idempotencyKey),
-    });
     expect(movementsAfter).toHaveLength(1);
   });
 
@@ -415,12 +430,14 @@ describe("POST /api/sync", () => {
     const duplicateBody = await duplicateResponse.json();
     expect(duplicateBody.results[0].status).toBe("duplicate");
 
-    const activeAlerts = await db.query.alerts.findMany({
-      where: and(
-        eq(alerts.tenantId, tenantId),
-        eq(alerts.productId, productId),
-        eq(alerts.status, "active")
-      ),
+    const activeAlerts = await withTenantContext(db, tenantId, async () => {
+      return await db.query.alerts.findMany({
+        where: and(
+          eq(alerts.tenantId, tenantId),
+          eq(alerts.productId, productId),
+          eq(alerts.status, "active")
+        ),
+      });
     });
 
     expect(activeAlerts).toHaveLength(1);
@@ -555,8 +572,10 @@ describe("POST /api/sync", () => {
     expect(body.results[0].status).toBe("validation_error");
     expect(body.results[0].message).toContain("Critical threshold must be less than attention threshold");
 
-    const syncedProduct = await db.query.products.findFirst({
-      where: eq(products.id, operationId),
+    const syncedProduct = await withTenantContext(db, tenantId, async () => {
+      return await db.query.products.findFirst({
+        where: eq(products.id, operationId),
+      });
     });
     expect(syncedProduct).toBeUndefined();
   });
@@ -637,12 +656,14 @@ describe("POST /api/sync", () => {
     const body = await response.json();
     expect(body.results[0].status).toBe("success");
 
-    const activeAlerts = await db.query.alerts.findMany({
-      where: and(
-        eq(alerts.tenantId, tenantId),
-        eq(alerts.productId, productId),
-        eq(alerts.status, "active")
-      ),
+    const activeAlerts = await withTenantContext(db, tenantId, async () => {
+      return await db.query.alerts.findMany({
+        where: and(
+          eq(alerts.tenantId, tenantId),
+          eq(alerts.productId, productId),
+          eq(alerts.status, "active")
+        ),
+      });
     });
 
     expect(activeAlerts).toHaveLength(1);

@@ -1,17 +1,20 @@
 // @vitest-environment node
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { createCaller } from "~/server/api/root";
 import { createTRPCContext } from "~/server/api/trpc";
 import { tenantInvitations, tenantMemberships, tenants, user } from "~/server/db/schema";
 import {
   cleanDatabase,
-  createTestDb,
   generateTestEmail,
   generateTestTenantName,
 } from "../helpers/database";
+import {
+  setTestTenantContext,
+  testDb,
+} from "../helpers/tenant-test-factories";
 
 let ipSequence = 100;
 let tokenSequence = 0;
@@ -42,7 +45,7 @@ async function createProtectedCaller(cookie: string, clientIp: string) {
   };
 }
 
-async function ensureInvitationSchema(db: ReturnType<typeof createTestDb>) {
+async function ensureInvitationSchema(db: typeof testDb) {
   const client = await db.$client;
 
   await client`SET client_min_messages = warning`;
@@ -129,7 +132,6 @@ async function ensureInvitationSchema(db: ReturnType<typeof createTestDb>) {
 }
 
 describe("Auth invitations", () => {
-  const testDb = createTestDb();
 
   beforeEach(async () => {
     await ensureInvitationSchema(testDb);
@@ -179,6 +181,8 @@ describe("Auth invitations", () => {
     const cookie = setCookie.split(";")[0] ?? "";
 
     if (role !== "Admin") {
+      // Set tenant context so RLS allows the UPDATE on tenant_memberships
+      await testDb.execute(sql`select set_config('app.tenant_id', ${signUpResult.tenant.id}, false)`);
       await testDb
         .update(tenantMemberships)
         .set({ role })
@@ -189,6 +193,9 @@ describe("Auth invitations", () => {
           )
         );
     }
+
+    // Set tenant context on local testDb for subsequent direct queries (FORCE RLS)
+    await testDb.execute(sql`select set_config('app.tenant_id', ${signUpResult.tenant.id}, false)`);
 
     return {
       userId: signUpResult.user.id,

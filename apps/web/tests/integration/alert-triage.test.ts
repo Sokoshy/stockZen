@@ -10,6 +10,7 @@ import {
   cleanTestDatabase,
   createTenantContext,
   createTestTenant,
+  setTestTenantContext,
   testDb,
 } from "../helpers/tenant-test-factories";
 
@@ -21,6 +22,7 @@ describe("Alert Triage Integration Tests", () => {
   describe("markHandled", () => {
     it("marks an active alert as handled", async () => {
       const admin = await createTestTenant();
+      await setTestTenantContext(admin.tenantId);
       const ctx = await createTenantContext(admin);
 
       const product = await ctx.caller.products.create({
