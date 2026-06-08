@@ -19,6 +19,9 @@ export async function cleanDatabase(db: ReturnType<typeof createTestDb>) {
   const client = await db.$client;
 
   await client.unsafe(`ROLLBACK`).catch(() => {});
+  
+  // Reset tenant context to allow superuser to bypass RLS for cleanup
+  await client.unsafe(`RESET app.tenant_id`).catch(() => {});
 
   await client.unsafe(`
     DO $$

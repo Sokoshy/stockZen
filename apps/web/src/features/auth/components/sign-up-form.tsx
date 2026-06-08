@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 
-import { signUpSchema, type SignUpInput } from "~/schemas/auth";
+import { signUpSchema, type SignUpFormInput } from "~/schemas/auth";
 import { api } from "~/trpc/react";
 
 interface SignUpFormProps {
@@ -19,13 +19,14 @@ export function SignUpForm({ onSuccess }: SignUpFormProps) {
     handleSubmit,
     setError,
     formState: { errors, isSubmitting },
-  } = useForm<SignUpInput>({
+  } = useForm<SignUpFormInput>({
     resolver: zodResolver(signUpSchema),
     defaultValues: {
       email: "",
       password: "",
       confirmPassword: "",
       tenantName: "",
+      rememberMe: false,
     },
   });
 
@@ -46,7 +47,7 @@ export function SignUpForm({ onSuccess }: SignUpFormProps) {
         Object.entries(fieldErrors).forEach(([field, messages]) => {
           const message = messages?.[0];
           if (message) {
-            setError(field as keyof SignUpInput, {
+            setError(field as keyof SignUpFormInput, {
               type: "server",
               message,
             });
@@ -67,7 +68,7 @@ export function SignUpForm({ onSuccess }: SignUpFormProps) {
     },
   });
 
-  const onSubmit = async (data: SignUpInput) => {
+  const onSubmit = async (data: SignUpFormInput) => {
     setServerError(null);
     await signUpMutation.mutateAsync(data).catch(() => undefined);
   };
@@ -176,6 +177,21 @@ export function SignUpForm({ onSuccess }: SignUpFormProps) {
             {errors.confirmPassword.message}
           </p>
         )}
+      </div>
+
+      <div className="flex items-center gap-2">
+        <input
+          {...register("rememberMe")}
+          id="rememberMe"
+          type="checkbox"
+          className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
+        />
+        <label
+          htmlFor="rememberMe"
+          className="block text-sm text-gray-900"
+        >
+          Remember me for 30 days
+        </label>
       </div>
 
       <div>

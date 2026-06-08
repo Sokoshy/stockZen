@@ -9,7 +9,7 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./tests/setup.ts"],
     fileParallelism: false,
-    exclude: [...configDefaults.exclude, "tests/e2e/**/*.spec.ts"],
+    exclude: [...configDefaults.exclude, "tests/e2e/**"],
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],

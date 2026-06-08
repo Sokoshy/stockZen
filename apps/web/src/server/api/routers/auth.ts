@@ -50,7 +50,6 @@ import {
 } from "~/server/better-auth/invitation-email";
 import {
   buildClearSessionCookie,
-  buildSessionCookie,
   extractSessionToken,
 } from "~/server/better-auth/session-cookie";
 import {
@@ -310,7 +309,7 @@ export const authRouter = createTRPCRouter({
     .input(signUpSchema)
     .output(signUpResponseSchema)
     .mutation(async ({ input, ctx }) => {
-      const { email, password, tenantName } = input;
+      const { email, password, tenantName, rememberMe } = input;
 
       const rateKey = `sign-up:${getClientIp(ctx.headers)}`;
       const rateResult = rateLimit(rateKey, { limit: 5, windowMs: 60_000 });
@@ -412,23 +411,29 @@ export const authRouter = createTRPCRouter({
           };
         });
 
+        // Extract session token from Better Auth result
         const sessionInfo = extractSessionToken(betterAuthResult);
-        if (sessionInfo.setCookie) {
-          ctx.responseHeaders.append("Set-Cookie", sessionInfo.setCookie);
-        } else if (sessionInfo.token) {
-          ctx.responseHeaders.append(
-            "Set-Cookie",
-            buildSessionCookie({
-              token: sessionInfo.token,
-              expiresAt: sessionInfo.expiresAt,
-            })
-          );
-        } else {
+        const sessionToken = sessionInfo.token || sessionInfo.setCookie;
+
+        if (!sessionToken) {
           throw new TRPCError({
             code: "INTERNAL_SERVER_ERROR",
             message: "Failed to establish a session after sign up.",
           });
         }
+
+        // Extend session expiry if rememberMe is enabled, otherwise use provided expiry or default
+        let sessionExpiresAt: Date;
+        if (rememberMe) {
+          sessionExpiresAt = await applyRememberMeExtension(ctx.db, sessionToken, rememberMe);
+        } else if (sessionInfo.expiresAt) {
+          sessionExpiresAt = new Date(sessionInfo.expiresAt);
+        } else {
+          // Default to 7 days if no expiry provided
+          sessionExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+        }
+
+        setSessionCookieAfterAuth(ctx.responseHeaders, sessionToken, rememberMe, sessionExpiresAt);
 
         return {
           success: true,
@@ -520,10 +525,16 @@ export const authRouter = createTRPCRouter({
           });
         }
 
-        // Better Auth signs the cookie token (rawToken.signature) but stores
-        // only the raw token in the DB.  Extract the raw part so we can
-        // match it against the session row.
-        const rawToken = signedToken.split(".")[0] ?? signedToken;
+        // Better Auth tokens are formatted as "<raw>.<signature>" — we extract
+        // only the raw part since the DB stores the un-signed token.
+        const tokenParts = signedToken.split(".");
+        if (tokenParts.length < 2) {
+          logger.warn(
+            { tokenLength: signedToken.length },
+            "Signed token missing '.' separator; using token as-is"
+          );
+        }
+        const rawToken = tokenParts[0] ?? signedToken;
 
         const sessionExpiresAt = await applyRememberMeExtension(
           ctx.db,
