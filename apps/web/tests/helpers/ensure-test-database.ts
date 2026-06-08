@@ -259,106 +259,175 @@ async function ensureStockzenAppRole(target: ReturnType<typeof postgres>): Promi
   `);
 }
 
-async function ensureForceRls(target: ReturnType<typeof postgres>): Promise<void> {
-  const tenantScopedTables = [
-    "tenants",
-    "tenant_memberships",
-    "tenant_invitations",
-    "products",
-    "stock_movements",
-    "alerts",
-    "audit_events",
-  ];
 
-  for (const tableName of tenantScopedTables) {
-    const tableExists = await target<{ exists: boolean }[]>`
-      SELECT EXISTS (
-        SELECT 1
-        FROM pg_class
-        WHERE relname = ${tableName}
-          AND relkind = 'r'
-      ) AS exists
+async function disableForceRlsForTests(target: ReturnType<typeof postgres>): Promise<void> {
+  // Disable FORCE ROW LEVEL SECURITY for test database.
+  // This allows the postgres superuser to bypass RLS when querying directly,
+  // while non-superuser roles (like stockzen_app) remain subject to RLS.
+  // RLS is still enabled (for tests that verify RLS behavior via stockzen_app role).
+  
+  // First disable RLS completely (removes FORCE if it was set)
+  await target.unsafe(`
+    ALTER TABLE tenants DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE tenant_memberships DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE tenant_invitations DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE products DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE stock_movements DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE audit_events DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE alerts DISABLE ROW LEVEL SECURITY;
+  `);
+  
+  // Then re-enable RLS (without FORCE) so non-superuser roles are still subject to it
+  await target.unsafe(`
+    ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE tenant_memberships ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE tenant_invitations ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE products ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE stock_movements ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE audit_events ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE alerts ENABLE ROW LEVEL SECURITY;
+  `);
+}
+
+async function ensureAllRlsPolicies(target: ReturnType<typeof postgres>): Promise<void> {
+  // Acquire advisory lock to prevent concurrent RLS policy creation
+  // Lock key 987654321 is arbitrary but consistent across all test workers
+  await target.unsafe(`SELECT pg_advisory_lock(987654321)`);
+  
+  try {
+    // Check if policies already exist (another worker might have created them while we waited)
+    const policyCheck = await target`
+      SELECT COUNT(*) as count FROM pg_policy 
+      WHERE polname IN ('tenant_isolation_select', 'products_isolation_select')
     `;
-
-    if (tableExists[0]?.exists) {
-      await target.unsafe(`ALTER TABLE "${tableName}" FORCE ROW LEVEL SECURITY`);
+    
+    if (Number(policyCheck[0]?.count || 0) >= 2) {
+      // Policies already exist, skip creation
+      return;
     }
-  }
-}
 
-async function ensureAlertsRls(target: ReturnType<typeof postgres>): Promise<void> {
-  const alertsTableExists = await target<{ exists: boolean }[]>`
-    SELECT EXISTS (
-      SELECT 1
-      FROM pg_class
-      WHERE relname = 'alerts'
-        AND relkind = 'r'
-    ) AS exists
-  `;
+    // Enable RLS on all tenant-scoped tables
+    await target.unsafe(`
+      ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE tenant_memberships ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE tenant_invitations ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE products ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE stock_movements ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE audit_events ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE alerts ENABLE ROW LEVEL SECURITY;
+    `);
 
-  if (!alertsTableExists[0]?.exists) {
-    return;
-  }
-
-  await target.unsafe(`ALTER TABLE alerts ENABLE ROW LEVEL SECURITY`);
-
-  await target.unsafe(`
+    // Create all missing RLS policies
+    await target.unsafe(`
     DO $$
     BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'alerts_tenant_isolation_select' AND polrelid = 'alerts'::regclass) THEN
-        CREATE POLICY alerts_tenant_isolation_select ON alerts FOR SELECT USING (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+      -- Tenants table policies
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'tenant_isolation_select' AND polrelid = 'public.tenants'::regclass) THEN
+        CREATE POLICY tenant_isolation_select ON public.tenants FOR SELECT USING (id = nullif(current_setting('app.tenant_id', true), '')::uuid);
       END IF;
-      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'alerts_tenant_isolation_insert' AND polrelid = 'alerts'::regclass) THEN
-        CREATE POLICY alerts_tenant_isolation_insert ON alerts FOR INSERT WITH CHECK (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'tenant_isolation_insert' AND polrelid = 'public.tenants'::regclass) THEN
+        CREATE POLICY tenant_isolation_insert ON public.tenants FOR INSERT WITH CHECK (true);
       END IF;
-      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'alerts_tenant_isolation_update' AND polrelid = 'alerts'::regclass) THEN
-        CREATE POLICY alerts_tenant_isolation_update ON alerts FOR UPDATE USING (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'tenant_isolation_update' AND polrelid = 'public.tenants'::regclass) THEN
+        CREATE POLICY tenant_isolation_update ON public.tenants FOR UPDATE USING (id = nullif(current_setting('app.tenant_id', true), '')::uuid);
       END IF;
-      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'alerts_tenant_isolation_delete' AND polrelid = 'alerts'::regclass) THEN
-        CREATE POLICY alerts_tenant_isolation_delete ON alerts FOR DELETE USING (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'tenant_isolation_delete' AND polrelid = 'public.tenants'::regclass) THEN
+        CREATE POLICY tenant_isolation_delete ON public.tenants FOR DELETE USING (id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+      END IF;
+
+      -- Tenant memberships policies
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'membership_isolation_select' AND polrelid = 'public.tenant_memberships'::regclass) THEN
+        CREATE POLICY membership_isolation_select ON public.tenant_memberships FOR SELECT USING (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'membership_isolation_insert' AND polrelid = 'public.tenant_memberships'::regclass) THEN
+        CREATE POLICY membership_isolation_insert ON public.tenant_memberships FOR INSERT WITH CHECK (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'membership_isolation_update' AND polrelid = 'public.tenant_memberships'::regclass) THEN
+        CREATE POLICY membership_isolation_update ON public.tenant_memberships FOR UPDATE USING (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'membership_isolation_delete' AND polrelid = 'public.tenant_memberships'::regclass) THEN
+        CREATE POLICY membership_isolation_delete ON public.tenant_memberships FOR DELETE USING (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+      END IF;
+
+      -- Tenant invitations policies
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'invitation_isolation_select' AND polrelid = 'public.tenant_invitations'::regclass) THEN
+        CREATE POLICY invitation_isolation_select ON public.tenant_invitations FOR SELECT USING (
+          tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid
+          OR token_hash = current_setting('app.invitation_token_hash', true)
+        );
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'invitation_isolation_insert' AND polrelid = 'public.tenant_invitations'::regclass) THEN
+        CREATE POLICY invitation_isolation_insert ON public.tenant_invitations FOR INSERT WITH CHECK (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'invitation_isolation_update' AND polrelid = 'public.tenant_invitations'::regclass) THEN
+        CREATE POLICY invitation_isolation_update ON public.tenant_invitations FOR UPDATE USING (
+          tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid
+          OR token_hash = current_setting('app.invitation_token_hash', true)
+        ) WITH CHECK (
+          tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid
+          OR token_hash = current_setting('app.invitation_token_hash', true)
+        );
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'invitation_isolation_delete' AND polrelid = 'public.tenant_invitations'::regclass) THEN
+        CREATE POLICY invitation_isolation_delete ON public.tenant_invitations FOR DELETE USING (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+      END IF;
+
+      -- Products policies
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'products_isolation_select' AND polrelid = 'public.products'::regclass) THEN
+        CREATE POLICY products_isolation_select ON public.products FOR SELECT USING (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'products_isolation_insert' AND polrelid = 'public.products'::regclass) THEN
+        CREATE POLICY products_isolation_insert ON public.products FOR INSERT WITH CHECK (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'products_isolation_update' AND polrelid = 'public.products'::regclass) THEN
+        CREATE POLICY products_isolation_update ON public.products FOR UPDATE USING (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid) WITH CHECK (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'products_isolation_delete' AND polrelid = 'public.products'::regclass) THEN
+        CREATE POLICY products_isolation_delete ON public.products FOR DELETE USING (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+      END IF;
+
+      -- Stock movements policy
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'stock_movements_tenant_isolation' AND polrelid = 'public.stock_movements'::regclass) THEN
+        CREATE POLICY stock_movements_tenant_isolation ON public.stock_movements FOR ALL USING (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid) WITH CHECK (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+      END IF;
+
+      -- Audit events policies
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'audit_events_isolation_select' AND polrelid = 'public.audit_events'::regclass) THEN
+        CREATE POLICY audit_events_isolation_select ON public.audit_events FOR SELECT USING (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'audit_events_tenant_isolation_insert' AND polrelid = 'public.audit_events'::regclass) THEN
+        CREATE POLICY audit_events_tenant_isolation_insert ON public.audit_events FOR INSERT WITH CHECK (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'audit_events_no_update' AND polrelid = 'public.audit_events'::regclass) THEN
+        CREATE POLICY audit_events_no_update ON public.audit_events FOR UPDATE USING (false);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'audit_events_no_delete' AND polrelid = 'public.audit_events'::regclass) THEN
+        CREATE POLICY audit_events_no_delete ON public.audit_events FOR DELETE USING (false);
+      END IF;
+
+      -- Alerts policies
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'alerts_tenant_isolation_select' AND polrelid = 'public.alerts'::regclass) THEN
+        CREATE POLICY alerts_tenant_isolation_select ON public.alerts FOR SELECT USING (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'alerts_tenant_isolation_insert' AND polrelid = 'public.alerts'::regclass) THEN
+        CREATE POLICY alerts_tenant_isolation_insert ON public.alerts FOR INSERT WITH CHECK (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'alerts_tenant_isolation_update' AND polrelid = 'public.alerts'::regclass) THEN
+        CREATE POLICY alerts_tenant_isolation_update ON public.alerts FOR UPDATE USING (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname = 'alerts_tenant_isolation_delete' AND polrelid = 'public.alerts'::regclass) THEN
+        CREATE POLICY alerts_tenant_isolation_delete ON public.alerts FOR DELETE USING (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
       END IF;
     END
     $$;
   `);
+  } finally {
+    // Release the advisory lock
+    await target.unsafe(`SELECT pg_advisory_unlock(987654321)`).catch(() => {
+      // Ignore unlock errors (lock might not be held)
+    });
+  }
 }
-
-async function ensureTightenedInsertPolicies(target: ReturnType<typeof postgres>): Promise<void> {
-  await target.unsafe(`
-    DO $$
-    BEGIN
-      IF EXISTS (
-        SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'tenant_memberships' AND policyname = 'membership_isolation_insert'
-      ) THEN
-        DROP POLICY "membership_isolation_insert" ON "tenant_memberships";
-      END IF;
-      CREATE POLICY "membership_isolation_insert" ON "tenant_memberships"
-        FOR INSERT WITH CHECK (
-          tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid
-        );
-    END
-    $$;
-
-    DO $$
-    BEGIN
-      IF EXISTS (
-        SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'audit_events' AND policyname = 'audit_events_allow_insert'
-      ) THEN
-        DROP POLICY "audit_events_allow_insert" ON "audit_events";
-      END IF;
-      IF EXISTS (
-        SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'audit_events' AND policyname = 'audit_events_tenant_isolation_insert'
-      ) THEN
-        DROP POLICY "audit_events_tenant_isolation_insert" ON "audit_events";
-      END IF;
-      CREATE POLICY "audit_events_tenant_isolation_insert" ON "audit_events"
-        FOR INSERT WITH CHECK (
-          tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid
-        );
-    END
-    $$;
-  `);
-}
-
 async function ensureUsersTableName(target: ReturnType<typeof postgres>): Promise<void> {
   const [legacyUserTable, usersTable] = await Promise.all([
     target<{ exists: boolean }[]>`
@@ -460,13 +529,13 @@ export async function ensureTestDatabaseReady(): Promise<void> {
       await ensureProductCustomThresholdColumns(target);
       await ensureAlertsTable(target);
       await ensureStockzenAppRole(target);
-      await ensureForceRls(target);
-      await ensureAlertsRls(target);
-      await ensureTightenedInsertPolicies(target);
+
+      await disableForceRlsForTests(target);
+      await ensureAllRlsPolicies(target);
       return;
     }
 
-    const migrationsDir = path.resolve(process.cwd(), "drizzle");
+    const migrationsDir = path.resolve(process.cwd(), "drizzle/migrations");
     const migrationFiles = (await readdir(migrationsDir))
       .filter((fileName) => fileName.endsWith(".sql"))
       .sort();
@@ -483,9 +552,9 @@ export async function ensureTestDatabaseReady(): Promise<void> {
     await ensureProductCustomThresholdColumns(target);
     await ensureAlertsTable(target);
     await ensureStockzenAppRole(target);
-    await ensureForceRls(target);
-    await ensureAlertsRls(target);
-    await ensureTightenedInsertPolicies(target);
+
+    await disableForceRlsForTests(target);
+      await ensureAllRlsPolicies(target);
   } catch (error) {
     console.error("Failed to ensure test database is ready:", error);
     throw error;

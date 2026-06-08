@@ -1,4 +1,3 @@
 allowBuilds:
-  '@seontechnologies/playwright-utils': set this to true or false
-  esbuild: set this to true or false
-  sharp: set this to true or false
+  esbuild: true
+  sharp: true

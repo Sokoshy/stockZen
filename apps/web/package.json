@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "postinstall": "node scripts/fix-kysely-adapter.mjs",
     "build": "next build",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
@@ -18,7 +19,8 @@
     "test:e2e:debug": "playwright test --config=playwright.config.ts --debug",
     "test:e2e:headed": "playwright test --config=playwright.config.ts --headed",
     "test:run": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "fix-kysely-adapter": "node scripts/fix-kysely-adapter.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

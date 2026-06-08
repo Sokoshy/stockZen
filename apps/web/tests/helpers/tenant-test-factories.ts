@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { createCaller } from "~/server/api/root";
 import { createTRPCContext } from "~/server/api/trpc";
 import {
@@ -103,6 +103,17 @@ export async function createTestTenant(): Promise<TestTenant> {
     cookie: extractSessionCookie(setCookie),
     ip: loginIp,
   };
+}
+
+/**
+ * Sets the tenant context on the testDb connection so FORCE RLS allows
+ * direct INSERTs/UPDATEs in tests. Uses `set_config(..., false)` because
+ * `SET app.tenant_id = $1` does not accept bound parameters in PostgreSQL.
+ */
+export async function setTestTenantContext(tenantId: string): Promise<void> {
+  await testDb.execute(
+    sql`select set_config('app.tenant_id', ${tenantId}, false)`,
+  );
 }
 
 export async function createTenantContext(tenant: TestTenant): Promise<TenantContext> {

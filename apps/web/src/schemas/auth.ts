@@ -34,6 +34,7 @@ export const signUpSchema = z
       .string()
       .min(1, "Organization name is required")
       .max(255, "Organization name must be at most 255 characters"),
+    rememberMe: z.boolean().default(false),
   })
   .refine((data) => data.password === data.confirmPassword, {
     message: "Passwords do not match",
@@ -41,6 +42,7 @@ export const signUpSchema = z
   });
 
 export type SignUpInput = z.infer<typeof signUpSchema>;
+export type SignUpFormInput = z.input<typeof signUpSchema>;
 
 /**
  * Login input validation schema

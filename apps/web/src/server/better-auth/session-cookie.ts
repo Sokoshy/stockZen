@@ -2,6 +2,9 @@ import { env } from "~/lib/env";
 
 const SESSION_COOKIE_NAME = "__session";
 const DEFAULT_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
+// Non-rememberMe sessions have a DB TTL of 30 minutes; align the cookie
+// Max-Age so the browser evicts the cookie at the same time.
+const NON_PERSISTENT_SESSION_MAX_AGE_SECONDS = 60 * 30;
 
 type SessionCookieInput = {
   token: string;
@@ -56,6 +59,8 @@ export function buildSessionCookie(input: SessionCookieInput): string {
   const parts = [`${SESSION_COOKIE_NAME}=${encodeURIComponent(input.token)}`];
   const secure = env.NODE_ENV === "production";
 
+  // Align cookie lifetime with DB TTL (30 min) for non-persistent sessions
+  parts.push(`Max-Age=${NON_PERSISTENT_SESSION_MAX_AGE_SECONDS}`);
   parts.push("Path=/");
   parts.push("HttpOnly");
   parts.push("SameSite=Lax");
