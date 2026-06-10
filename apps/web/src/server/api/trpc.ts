@@ -15,8 +15,9 @@ import { ZodError } from "zod";
 import { auth } from "~/server/better-auth";
 import { db } from "~/server/db";
 import { user } from "~/server/db/schema";
-import { withTenantContext } from "~/server/db/rls";
+import { withTenantContext, UUID_PATTERN } from "~/server/db/rls";
 import { logger } from "~/server/logger";
+import { requireMembership } from "./require-membership";
 
 /**
  * 1. CONTEXT
@@ -38,11 +39,16 @@ export const createTRPCContext = async (opts: { headers: Headers }) => {
 
   let tenantId: string | null = null;
   if (session?.user?.id) {
-    const userRecord = await db.query.user.findFirst({
-      columns: { defaultTenantId: true },
-      where: eq(user.id, session.user.id),
-    });
-    tenantId = userRecord?.defaultTenantId ?? null;
+    const xTenantId = opts.headers.get("x-tenant-id");
+    if (xTenantId && UUID_PATTERN.test(xTenantId)) {
+      tenantId = xTenantId;
+    } else {
+      const userRecord = await db.query.user.findFirst({
+        columns: { defaultTenantId: true },
+        where: eq(user.id, session.user.id),
+      });
+      tenantId = userRecord?.defaultTenantId ?? null;
+    }
   }
 
   return {
@@ -61,7 +67,7 @@ export const createTRPCContext = async (opts: { headers: Headers }) => {
  * ZodErrors so that you get typesafety on the frontend if your procedure fails due to validation
  * errors on the backend.
  */
-const t = initTRPC.context<typeof createTRPCContext>().create({
+export const t = initTRPC.context<typeof createTRPCContext>().create({
   transformer: superjson,
   errorFormatter({ shape, error }) {
     return {
@@ -163,3 +169,5 @@ export const protectedProcedure = t.procedure
       })
     );
   });
+
+export const membershipProcedure = protectedProcedure.use(requireMembership());

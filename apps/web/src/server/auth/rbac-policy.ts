@@ -30,6 +30,11 @@ const rolePriority: Record<TenantRole, number> = {
   Operator: 1,
 };
 
+export function hasRequiredRole(userRole: TenantRole, minRole?: TenantRole): boolean {
+  if (!minRole) return true;
+  return rolePriority[userRole] >= rolePriority[minRole];
+}
+
 export function canViewPurchasePrice(role: TenantRole): boolean {
   return rolePriority[role] >= rolePriority["Manager"];
 }

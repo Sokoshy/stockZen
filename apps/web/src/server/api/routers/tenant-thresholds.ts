@@ -5,65 +5,22 @@ import {
   tenantDefaultThresholdsOutputSchema,
   updateTenantDefaultThresholdsInputSchema,
 } from "~/schemas/tenant-thresholds";
-import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
+import { createTRPCRouter, membershipProcedure } from "~/server/api/trpc";
 import { canManageTenantMembers } from "~/server/auth/rbac-policy";
-import type { db as rootDb } from "~/server/db";
 import { products, tenants } from "~/server/db/schema";
 import { recomputeAlertsForProducts } from "~/server/services/alert-service";
 
-function assertTenantId(tenantId: string | null): string {
-  if (!tenantId) {
-    throw new TRPCError({
-      code: "FORBIDDEN",
-      message: "Tenant context required",
-    });
-  }
-
-  return tenantId;
-}
-
-async function getMembershipOrThrow(input: {
-  tenantId: string;
-  userId: string;
-  db: Pick<typeof rootDb, "query">;
-}) {
-  const membership = await input.db.query.tenantMemberships.findFirst({
-    columns: {
-      role: true,
-    },
-    where: (memberships, { and, eq }) =>
-      and(eq(memberships.tenantId, input.tenantId), eq(memberships.userId, input.userId)),
-  });
-
-  if (!membership) {
-    throw new TRPCError({
-      code: "FORBIDDEN",
-      message: "Active tenant membership is required for this operation.",
-    });
-  }
-
-  return membership;
-}
-
 export const tenantThresholdsRouter = createTRPCRouter({
-  getTenantDefaultThresholds: protectedProcedure
+  getTenantDefaultThresholds: membershipProcedure
     .output(tenantDefaultThresholdsOutputSchema)
     .query(async ({ ctx }) => {
-      const tenantId = assertTenantId(ctx.tenantId);
-
-      await getMembershipOrThrow({
-        tenantId,
-        userId: ctx.session.user.id,
-        db: ctx.db,
-      });
-
       const [tenant] = await ctx.db
         .select({
           criticalThreshold: tenants.defaultCriticalThreshold,
           attentionThreshold: tenants.defaultAttentionThreshold,
         })
         .from(tenants)
-        .where(eq(tenants.id, tenantId))
+        .where(eq(tenants.id, ctx.tenantId!))
         .limit(1);
 
       if (!tenant) {
@@ -76,19 +33,11 @@ export const tenantThresholdsRouter = createTRPCRouter({
       return tenant;
     }),
 
-  updateTenantDefaultThresholds: protectedProcedure
+  updateTenantDefaultThresholds: membershipProcedure
     .input(updateTenantDefaultThresholdsInputSchema)
     .output(tenantDefaultThresholdsOutputSchema)
     .mutation(async ({ ctx, input }) => {
-      const tenantId = assertTenantId(ctx.tenantId);
-
-      const membership = await getMembershipOrThrow({
-        tenantId,
-        userId: ctx.session.user.id,
-        db: ctx.db,
-      });
-
-      if (!canManageTenantMembers(membership.role)) {
+      if (!canManageTenantMembers(ctx.membership.role)) {
         throw new TRPCError({
           code: "FORBIDDEN",
           message: "Only Admins can update tenant default thresholds",
@@ -101,7 +50,7 @@ export const tenantThresholdsRouter = createTRPCRouter({
           defaultCriticalThreshold: input.criticalThreshold,
           defaultAttentionThreshold: input.attentionThreshold,
         })
-        .where(eq(tenants.id, tenantId))
+        .where(eq(tenants.id, ctx.tenantId!))
         .returning({
           criticalThreshold: tenants.defaultCriticalThreshold,
           attentionThreshold: tenants.defaultAttentionThreshold,
@@ -119,7 +68,7 @@ export const tenantThresholdsRouter = createTRPCRouter({
         .from(products)
         .where(
           and(
-            eq(products.tenantId, tenantId),
+            eq(products.tenantId, ctx.tenantId!),
             isNull(products.deletedAt),
             isNull(products.customCriticalThreshold),
             isNull(products.customAttentionThreshold)
@@ -128,7 +77,7 @@ export const tenantThresholdsRouter = createTRPCRouter({
 
       const productIds = productsUsingDefaults.map((p) => p.id);
       if (productIds.length > 0) {
-        await recomputeAlertsForProducts(ctx.db, tenantId, productIds);
+        await recomputeAlertsForProducts(ctx.db, ctx.tenantId!, productIds);
       }
 
       return updated;

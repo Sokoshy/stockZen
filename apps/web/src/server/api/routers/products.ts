@@ -11,7 +11,7 @@ import {
   productWithAlertOutputSchema,
   type ProductWithAlertOutput,
 } from "~/schemas/products";
-import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
+import { createTRPCRouter, membershipProcedure } from "~/server/api/trpc";
 import {
   sanitizeProductInputForRole,
   serializeProductForRole,
@@ -156,23 +156,10 @@ async function attachAlertMetadata(
 }
 
 export const productsRouter = createTRPCRouter({
-  list: protectedProcedure.output(listProductsOutputSchema).query(async ({ ctx }) => {
-    const userId = ctx.session.user.id;
+  list: membershipProcedure.output(listProductsOutputSchema).query(async ({ ctx }) => {
+    const userId = ctx.session!.user.id;
     const tenantId = ctx.tenantId!;
-    const membership = await ctx.db.query.tenantMemberships.findFirst({
-      columns: { role: true },
-      where: (tm, { and: andExpr, eq: eqExpr }) =>
-        andExpr(eqExpr(tm.userId, userId), eqExpr(tm.tenantId, tenantId)),
-    });
-
-    if (!membership) {
-      throw new TRPCError({
-        code: "FORBIDDEN",
-        message: "User is not a member of this tenant",
-      });
-    }
-
-    const role = membership.role;
+    const role = ctx.membership.role;
 
     const productList =
       role === "Operator"
@@ -215,7 +202,7 @@ export const productsRouter = createTRPCRouter({
     };
   }),
 
-  suggestions: protectedProcedure
+  suggestions: membershipProcedure
     .output(
       z.object({
         categories: z.array(z.string()),
@@ -223,20 +210,7 @@ export const productsRouter = createTRPCRouter({
       })
     )
     .query(async ({ ctx }) => {
-      const userId = ctx.session.user.id;
       const tenantId = ctx.tenantId!;
-      const membership = await ctx.db.query.tenantMemberships.findFirst({
-        columns: { role: true },
-        where: (tm, { and: andExpr, eq: eqExpr }) =>
-          andExpr(eqExpr(tm.userId, userId), eqExpr(tm.tenantId, tenantId)),
-      });
-
-      if (!membership) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "User is not a member of this tenant",
-        });
-      }
 
       const rows = await ctx.db
         .select({
@@ -268,26 +242,13 @@ export const productsRouter = createTRPCRouter({
       };
     }),
 
-  getById: protectedProcedure
+  getById: membershipProcedure
     .input(z.object({ id: z.string().uuid() }))
     .output(productOutputSchema)
     .query(async ({ ctx, input }) => {
-      const userId = ctx.session.user.id;
+      const userId = ctx.session!.user.id;
       const tenantId = ctx.tenantId!;
-      const membership = await ctx.db.query.tenantMemberships.findFirst({
-        columns: { role: true },
-        where: (tm, { and: andExpr, eq: eqExpr }) =>
-          andExpr(eqExpr(tm.userId, userId), eqExpr(tm.tenantId, tenantId)),
-      });
-
-      if (!membership) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "User is not a member of this tenant",
-        });
-      }
-
-      const role = membership.role;
+      const role = ctx.membership.role;
 
       const product =
         role === "Operator"
@@ -325,26 +286,13 @@ export const productsRouter = createTRPCRouter({
       return serializeProductForRole(product, role);
     }),
 
-  create: protectedProcedure
+  create: membershipProcedure
     .input(productInputSchema)
     .output(productOutputSchema)
     .mutation(async ({ ctx, input }) => {
-      const userId = ctx.session.user.id;
+      const userId = ctx.session!.user.id;
       const tenantId = ctx.tenantId!;
-      const membership = await ctx.db.query.tenantMemberships.findFirst({
-        columns: { role: true },
-        where: (tm, { and: andExpr, eq: eqExpr }) =>
-          andExpr(eqExpr(tm.userId, userId), eqExpr(tm.tenantId, tenantId)),
-      });
-
-      if (!membership) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "User is not a member of this tenant",
-        });
-      }
-
-      const role = membership.role;
+      const role = ctx.membership.role;
 
       if (!canWritePurchasePrice(role) && Object.prototype.hasOwnProperty.call(input, "purchasePrice")) {
         logger.warn(
@@ -439,7 +387,7 @@ export const productsRouter = createTRPCRouter({
       return serializeProductForRole(product, role);
     }),
 
-  update: protectedProcedure
+  update: membershipProcedure
     .input(
       z.object({
         id: z.string().uuid(),
@@ -448,22 +396,9 @@ export const productsRouter = createTRPCRouter({
     )
     .output(productOutputSchema)
     .mutation(async ({ ctx, input }) => {
-      const userId = ctx.session.user.id;
+      const userId = ctx.session!.user.id;
       const tenantId = ctx.tenantId!;
-      const membership = await ctx.db.query.tenantMemberships.findFirst({
-        columns: { role: true },
-        where: (tm, { and: andExpr, eq: eqExpr }) =>
-          andExpr(eqExpr(tm.userId, userId), eqExpr(tm.tenantId, tenantId)),
-      });
-
-      if (!membership) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "User is not a member of this tenant",
-        });
-      }
-
-      const role = membership.role;
+      const role = ctx.membership.role;
 
       if (!canWritePurchasePrice(role) && Object.prototype.hasOwnProperty.call(input.data, "purchasePrice")) {
         logger.warn(
@@ -550,25 +485,12 @@ export const productsRouter = createTRPCRouter({
       return serializeProductForRole(updatedProduct, role);
     }),
 
-  delete: protectedProcedure
+  delete: membershipProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      const userId = ctx.session.user.id;
+      const userId = ctx.session!.user.id;
       const tenantId = ctx.tenantId!;
-      const membership = await ctx.db.query.tenantMemberships.findFirst({
-        columns: { role: true },
-        where: (tm, { and: andExpr, eq: eqExpr }) =>
-          andExpr(eqExpr(tm.userId, userId), eqExpr(tm.tenantId, tenantId)),
-      });
-
-      if (!membership) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "User is not a member of this tenant",
-        });
-      }
-
-      const role = membership.role;
+      const role = ctx.membership.role;
 
       const existingProduct = await ctx.db.query.products.findFirst({
         where: (p, { and: andExpr, eq: eqExpr, isNull: isNullExpr }) =>
@@ -599,30 +521,18 @@ export const productsRouter = createTRPCRouter({
       return { success: true, id: input.id };
     }),
 
-  import: protectedProcedure.mutation(async ({ ctx }) => {
-    const userId = ctx.session.user.id;
+  import: membershipProcedure.mutation(async ({ ctx }) => {
+    const userId = ctx.session!.user.id;
     const tenantId = ctx.tenantId!;
-    const membership = await ctx.db.query.tenantMemberships.findFirst({
-      columns: { role: true },
-      where: (tm, { and: andExpr, eq: eqExpr }) =>
-        andExpr(eqExpr(tm.userId, userId), eqExpr(tm.tenantId, tenantId)),
-    });
 
-    if (!membership) {
-      throw new TRPCError({
-        code: "FORBIDDEN",
-        message: "User is not a member of this tenant",
-      });
-    }
-
-    if (membership.role !== "Admin" && membership.role !== "Manager") {
+    if (ctx.membership.role !== "Admin" && ctx.membership.role !== "Manager") {
       throw new TRPCError({
         code: "FORBIDDEN",
         message: "Only Admin and Manager roles can import products",
       });
     }
 
-    logger.info({ userId, tenantId, role: membership.role }, "CSV import initiated");
+    logger.info({ userId, tenantId, role: ctx.membership.role }, "CSV import initiated");
 
     return {
       success: true,
