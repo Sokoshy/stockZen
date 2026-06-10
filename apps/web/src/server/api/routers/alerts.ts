@@ -5,12 +5,12 @@ import {
   markHandledInputSchema,
   snoozeAlertInputSchema,
 } from "~/schemas/alerts";
-import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
+import { createTRPCRouter, membershipProcedure } from "~/server/api/trpc";
 import { markHandled, snoozeForEightHours, listActiveAlerts } from "~/server/services/alert-service";
 import { logger } from "~/server/logger";
 
 export const alertsRouter = createTRPCRouter({
-  listActive: protectedProcedure
+  listActive: membershipProcedure
     .input(listActiveAlertsInputSchema)
     .output(listActiveAlertsOutputSchema)
     .query(async ({ ctx, input }) => {
@@ -41,7 +41,7 @@ export const alertsRouter = createTRPCRouter({
       };
     }),
 
-  dashboard: protectedProcedure
+  dashboard: membershipProcedure
     .input(listActiveAlertsInputSchema)
     .output(listActiveAlertsOutputSchema)
     .query(async ({ ctx, input }) => {
@@ -72,7 +72,7 @@ export const alertsRouter = createTRPCRouter({
       };
     }),
 
-  markHandled: protectedProcedure
+  markHandled: membershipProcedure
     .input(markHandledInputSchema)
     .mutation(async ({ ctx, input }) => {
       const userId = ctx.session.user.id;
@@ -105,7 +105,7 @@ export const alertsRouter = createTRPCRouter({
       }
     }),
 
-  snooze: protectedProcedure
+  snooze: membershipProcedure
     .input(snoozeAlertInputSchema)
     .mutation(async ({ ctx, input }) => {
       const userId = ctx.session.user.id;

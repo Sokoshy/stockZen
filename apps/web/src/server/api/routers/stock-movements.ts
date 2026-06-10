@@ -1,37 +1,17 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { createTRPCRouter, protectedProcedure } from "~/server/api/trpc";
+import { createTRPCRouter, membershipProcedure } from "~/server/api/trpc";
 import { stockMovementSyncSchema } from "~/schemas/stock-movements";
 import { inventoryService } from "~/server/services/inventory-service";
 
 export const stockMovementsRouter = createTRPCRouter({
-  create: protectedProcedure
+  create: membershipProcedure
     .input(stockMovementSyncSchema)
     .mutation(async ({ ctx, input }) => {
-      const tenantId = ctx.tenantId;
-      if (!tenantId) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Tenant context is required",
-        });
-      }
-
-      const membership = await ctx.db.query.tenantMemberships.findFirst({
-        columns: { role: true },
-        where: (tm, { and, eq }) => and(eq(tm.userId, ctx.session.user.id), eq(tm.tenantId, tenantId)),
-      });
-
-      if (!membership) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "User is not a member of this tenant",
-        });
-      }
-
       try {
         const movement = await inventoryService.createMovement({
           db: ctx.db,
-          tenantId,
+          tenantId: ctx.tenantId!,
           userId: ctx.session.user.id,
           productId: input.productId,
           type: input.type,
@@ -52,7 +32,7 @@ export const stockMovementsRouter = createTRPCRouter({
       }
     }),
 
-  listByProduct: protectedProcedure
+  listByProduct: membershipProcedure
     .input(
       z.object({
         productId: z.string(),
@@ -61,29 +41,9 @@ export const stockMovementsRouter = createTRPCRouter({
       })
     )
     .query(async ({ ctx, input }) => {
-      const tenantId = ctx.tenantId;
-      if (!tenantId) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Tenant context is required",
-        });
-      }
-
-      const membership = await ctx.db.query.tenantMemberships.findFirst({
-        columns: { role: true },
-        where: (tm, { and, eq }) => and(eq(tm.userId, ctx.session.user.id), eq(tm.tenantId, tenantId)),
-      });
-
-      if (!membership) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "User is not a member of this tenant",
-        });
-      }
-
       const movements = await inventoryService.getMovementsByProduct({
         db: ctx.db,
-        tenantId,
+        tenantId: ctx.tenantId!,
         productId: input.productId,
         limit: input.limit,
         cursor: input.cursor,
@@ -92,25 +52,8 @@ export const stockMovementsRouter = createTRPCRouter({
       return movements;
     }),
 
-  getPendingCount: protectedProcedure.query(async ({ ctx }) => {
-    const tenantId = ctx.tenantId;
-    if (!tenantId) {
-      return 0;
-    }
-
-    const membership = await ctx.db.query.tenantMemberships.findFirst({
-      columns: { role: true },
-      where: (tm, { and, eq }) => and(eq(tm.userId, ctx.session.user.id), eq(tm.tenantId, tenantId)),
-    });
-
-    if (!membership) {
-      throw new TRPCError({
-        code: "FORBIDDEN",
-        message: "User is not a member of this tenant",
-      });
-    }
-
-    const count = await inventoryService.getPendingMovementCount(ctx.db, tenantId);
+  getPendingCount: membershipProcedure.query(async ({ ctx }) => {
+    const count = await inventoryService.getPendingMovementCount(ctx.db, ctx.tenantId!);
     return count;
   }),
 });

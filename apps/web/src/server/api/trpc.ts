@@ -8,15 +8,16 @@
  */
 
 import { initTRPC, TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import superjson from "superjson";
 import { ZodError } from "zod";
 
 import { auth } from "~/server/better-auth";
 import { db } from "~/server/db";
-import { user } from "~/server/db/schema";
-import { withTenantContext } from "~/server/db/rls";
+import { tenantMemberships, user } from "~/server/db/schema";
+import { withTenantContext, UUID_PATTERN } from "~/server/db/rls";
 import { logger } from "~/server/logger";
+import type { TenantRole } from "~/schemas/team-membership";
 
 /**
  * 1. CONTEXT
@@ -38,11 +39,16 @@ export const createTRPCContext = async (opts: { headers: Headers }) => {
 
   let tenantId: string | null = null;
   if (session?.user?.id) {
-    const userRecord = await db.query.user.findFirst({
-      columns: { defaultTenantId: true },
-      where: eq(user.id, session.user.id),
-    });
-    tenantId = userRecord?.defaultTenantId ?? null;
+    const xTenantId = opts.headers.get("x-tenant-id");
+    if (xTenantId && UUID_PATTERN.test(xTenantId)) {
+      tenantId = xTenantId;
+    } else {
+      const userRecord = await db.query.user.findFirst({
+        columns: { defaultTenantId: true },
+        where: eq(user.id, session.user.id),
+      });
+      tenantId = userRecord?.defaultTenantId ?? null;
+    }
   }
 
   return {
@@ -61,7 +67,7 @@ export const createTRPCContext = async (opts: { headers: Headers }) => {
  * ZodErrors so that you get typesafety on the frontend if your procedure fails due to validation
  * errors on the backend.
  */
-const t = initTRPC.context<typeof createTRPCContext>().create({
+export const t = initTRPC.context<typeof createTRPCContext>().create({
   transformer: superjson,
   errorFormatter({ shape, error }) {
     return {
@@ -126,6 +132,35 @@ const timingMiddleware = t.middleware(async ({ next, path }) => {
  * guarantee that a user querying is authorized, but you can still access user session data if they
  * are logged in.
  */
+function requireMembership() {
+  return t.middleware(async ({ ctx, next }) => {
+    if (!ctx.session?.user) {
+      throw new TRPCError({ code: "UNAUTHORIZED", message: "Not authenticated" });
+    }
+    if (!ctx.tenantId) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "No tenant context" });
+    }
+    const membership = await ctx.db.query.tenantMemberships.findFirst({
+      columns: { role: true },
+      where: and(
+        eq(tenantMemberships.userId, ctx.session.user.id),
+        eq(tenantMemberships.tenantId, ctx.tenantId),
+      ),
+    });
+    if (!membership) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "User is not a member of this tenant" });
+    }
+    return next({
+      ctx: {
+        ...ctx,
+        session: ctx.session,
+        tenantId: ctx.tenantId,
+        membership: { role: membership.role } as { role: TenantRole },
+      },
+    });
+  });
+}
+
 export const publicProcedure = t.procedure.use(timingMiddleware);
 
 /**
@@ -163,3 +198,5 @@ export const protectedProcedure = t.procedure
       })
     );
   });
+
+export const membershipProcedure = protectedProcedure.use(requireMembership());
