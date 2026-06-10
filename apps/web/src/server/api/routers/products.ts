@@ -157,7 +157,7 @@ async function attachAlertMetadata(
 
 export const productsRouter = createTRPCRouter({
   list: membershipProcedure.output(listProductsOutputSchema).query(async ({ ctx }) => {
-    const userId = ctx.session!.user.id;
+    const userId = ctx.session.user.id;
     const tenantId = ctx.tenantId!;
     const role = ctx.membership.role;
 
@@ -246,7 +246,7 @@ export const productsRouter = createTRPCRouter({
     .input(z.object({ id: z.string().uuid() }))
     .output(productOutputSchema)
     .query(async ({ ctx, input }) => {
-      const userId = ctx.session!.user.id;
+      const userId = ctx.session.user.id;
       const tenantId = ctx.tenantId!;
       const role = ctx.membership.role;
 
@@ -290,7 +290,7 @@ export const productsRouter = createTRPCRouter({
     .input(productInputSchema)
     .output(productOutputSchema)
     .mutation(async ({ ctx, input }) => {
-      const userId = ctx.session!.user.id;
+      const userId = ctx.session.user.id;
       const tenantId = ctx.tenantId!;
       const role = ctx.membership.role;
 
@@ -396,7 +396,7 @@ export const productsRouter = createTRPCRouter({
     )
     .output(productOutputSchema)
     .mutation(async ({ ctx, input }) => {
-      const userId = ctx.session!.user.id;
+      const userId = ctx.session.user.id;
       const tenantId = ctx.tenantId!;
       const role = ctx.membership.role;
 
@@ -488,7 +488,7 @@ export const productsRouter = createTRPCRouter({
   delete: membershipProcedure
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      const userId = ctx.session!.user.id;
+      const userId = ctx.session.user.id;
       const tenantId = ctx.tenantId!;
       const role = ctx.membership.role;
 
@@ -522,7 +522,7 @@ export const productsRouter = createTRPCRouter({
     }),
 
   import: membershipProcedure.mutation(async ({ ctx }) => {
-    const userId = ctx.session!.user.id;
+    const userId = ctx.session.user.id;
     const tenantId = ctx.tenantId!;
 
     if (ctx.membership.role !== "Admin" && ctx.membership.role !== "Manager") {

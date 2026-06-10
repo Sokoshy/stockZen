@@ -8,16 +8,16 @@
  */
 
 import { initTRPC, TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import superjson from "superjson";
 import { ZodError } from "zod";
 
 import { auth } from "~/server/better-auth";
 import { db } from "~/server/db";
-import { user } from "~/server/db/schema";
+import { tenantMemberships, user } from "~/server/db/schema";
 import { withTenantContext, UUID_PATTERN } from "~/server/db/rls";
 import { logger } from "~/server/logger";
-import { requireMembership } from "./require-membership";
+import type { TenantRole } from "~/schemas/team-membership";
 
 /**
  * 1. CONTEXT
@@ -132,6 +132,35 @@ const timingMiddleware = t.middleware(async ({ next, path }) => {
  * guarantee that a user querying is authorized, but you can still access user session data if they
  * are logged in.
  */
+function requireMembership() {
+  return t.middleware(async ({ ctx, next }) => {
+    if (!ctx.session?.user) {
+      throw new TRPCError({ code: "UNAUTHORIZED", message: "Not authenticated" });
+    }
+    if (!ctx.tenantId) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "No tenant context" });
+    }
+    const membership = await ctx.db.query.tenantMemberships.findFirst({
+      columns: { role: true },
+      where: and(
+        eq(tenantMemberships.userId, ctx.session.user.id),
+        eq(tenantMemberships.tenantId, ctx.tenantId),
+      ),
+    });
+    if (!membership) {
+      throw new TRPCError({ code: "FORBIDDEN", message: "User is not a member of this tenant" });
+    }
+    return next({
+      ctx: {
+        ...ctx,
+        session: ctx.session,
+        tenantId: ctx.tenantId,
+        membership: { role: membership.role } as { role: TenantRole },
+      },
+    });
+  });
+}
+
 export const publicProcedure = t.procedure.use(timingMiddleware);
 
 /**
