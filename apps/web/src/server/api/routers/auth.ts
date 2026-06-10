@@ -1147,6 +1147,21 @@ export const authRouter = createTRPCRouter({
             },
             "Forbidden member removal attempt"
           );
+
+          // Persist audit event for forbidden attempt
+          await createAuditEvent({
+            tenantId,
+            actorUserId: ctx.session.user.id,
+            actionType: "forbidden_attempt",
+            targetType: "user",
+            targetId: input.memberUserId,
+            status: "failure",
+            context: JSON.stringify({
+              action: "member_remove",
+              actorRole: actorMembershipInTx?.role,
+            }),
+          });
+
           throw new TRPCError({
             code: "FORBIDDEN",
             message: "Only Admins can remove members.",
