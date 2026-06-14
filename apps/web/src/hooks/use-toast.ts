@@ -32,7 +32,7 @@ function genId() {
 
 type ActionType = typeof actionTypes
 
-type Action =
+export type Action =
   | {
       type: ActionType["ADD_TOAST"]
       toast: ToasterToast
@@ -50,7 +50,7 @@ type Action =
       toastId?: ToasterToast["id"]
     }
 
-interface State {
+export interface State {
   toasts: ToasterToast[]
 }
 
@@ -178,7 +178,7 @@ function useToast() {
         listeners.splice(index, 1)
       }
     }
-  }, [state])
+  }, [])
 
   return {
     ...state,
@@ -188,3 +188,10 @@ function useToast() {
 }
 
 export { useToast, toast }
+
+/** @internal Reset module-level state for testing only */
+export function resetToastsForTesting() {
+  memoryState = { toasts: [] }
+  count = 0
+  toastTimeouts.clear()
+}
