@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 
 import {
   createTenantWithAdmin,
@@ -12,7 +12,7 @@ import { appRouter } from "~/server/api/root";
 import { auditEvents } from "~/server/db/schema";
 
 describe("Auth Audit Logs", () => {
-  beforeAll(async () => {
+  beforeEach(async () => {
     await cleanupTestData();
   });
 
@@ -21,6 +21,10 @@ describe("Auth Audit Logs", () => {
       // Create test tenant and admin
       const { admin, tenant, password } = await createTenantWithAdmin("audit-login-test");
       const db = await getTestDb();
+
+      // Capture timestamp just before the explicit login under test to exclude
+      // the login event created during tenant factory setup.
+      const beforeExplicitLogin = new Date();
 
       // Perform login
       const caller = appRouter.createCaller(await setupTestTRPCContext({ db }));
@@ -34,15 +38,16 @@ describe("Auth Audit Logs", () => {
 
       // Check audit event was created
       const auditEvents = await db.query.auditEvents.findMany({
-        where: (events, { eq, and }) =>
+        where: (events, { eq, and, gte }) =>
           and(
             eq(events.tenantId, tenant.id),
             eq(events.actionType, "login"),
-            eq(events.actorUserId, admin.id)
+            eq(events.actorUserId, admin.id),
+            gte(events.createdAt, beforeExplicitLogin)
           ),
       });
 
-      expect(auditEvents.length).toBeGreaterThanOrEqual(1);
+      expect(auditEvents).toHaveLength(1);
       expect(auditEvents[0]?.status).toBe("success");
       expect(auditEvents[0]?.actionType).toBe("login");
     });
@@ -67,7 +72,7 @@ describe("Auth Audit Logs", () => {
         where: (events, { eq }) => eq(events.actionType, "login_failed"),
       });
 
-      expect(auditEvents.length).toBeGreaterThanOrEqual(1);
+      expect(auditEvents).toHaveLength(1);
       expect(auditEvents[0]?.status).toBe("failure");
     });
 
@@ -93,7 +98,7 @@ describe("Auth Audit Logs", () => {
           ),
       });
 
-      expect(auditEvents.length).toBeGreaterThanOrEqual(1);
+      expect(auditEvents).toHaveLength(1);
       expect(auditEvents[0]?.status).toBe("success");
     });
 
@@ -130,7 +135,7 @@ describe("Auth Audit Logs", () => {
           ),
       });
 
-      expect(auditEvents.length).toBeGreaterThanOrEqual(1);
+      expect(auditEvents).toHaveLength(1);
       expect(auditEvents[0]?.status).toBe("success");
       const context = JSON.parse(auditEvents[0]?.context ?? "{}");
       expect(context.previousRole).toBe("Operator");
@@ -168,7 +173,7 @@ describe("Auth Audit Logs", () => {
           ),
       });
 
-      expect(auditEvents.length).toBeGreaterThanOrEqual(1);
+      expect(auditEvents).toHaveLength(1);
       expect(auditEvents[0]?.status).toBe("success");
     });
 
@@ -199,7 +204,7 @@ describe("Auth Audit Logs", () => {
           ),
       });
 
-      expect(auditEvents.length).toBeGreaterThanOrEqual(1);
+      expect(auditEvents).toHaveLength(1);
       expect(auditEvents[0]?.status).toBe("success");
     });
 
@@ -240,7 +245,7 @@ describe("Auth Audit Logs", () => {
           ),
       });
 
-      expect(auditEvents.length).toBeGreaterThanOrEqual(1);
+      expect(auditEvents).toHaveLength(1);
       expect(auditEvents[0]?.status).toBe("success");
     });
   });
@@ -455,7 +460,7 @@ describe("Auth Audit Logs", () => {
           ),
       });
 
-      expect(auditEvents.length).toBeGreaterThanOrEqual(1);
+      expect(auditEvents).toHaveLength(1);
       expect(auditEvents[0]?.status).toBe("failure");
     });
 
@@ -494,7 +499,7 @@ describe("Auth Audit Logs", () => {
           ),
       });
 
-      expect(auditEvents.length).toBeGreaterThanOrEqual(1);
+      expect(auditEvents).toHaveLength(1);
       expect(auditEvents[0]?.status).toBe("failure");
     });
   });

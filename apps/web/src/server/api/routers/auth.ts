@@ -75,6 +75,7 @@ import {
 import { logger } from "~/server/logger";
 import { getClientIp, rateLimit } from "~/server/rate-limit";
 import { createAuditEvent } from "~/server/services/audit-service";
+import type { TenantRole } from "~/schemas/team-membership";
 import {
   BILLING_UPGRADE_ROUTE,
   checkUserLimit,
@@ -541,6 +542,7 @@ export const authRouter = createTRPCRouter({
 
         // Persist audit event
         await createAuditEvent({
+          db: ctx.db,
           tenantId: userRecord.defaultTenantId,
           actorUserId: userRecord.id,
           actionType: "login",
@@ -578,6 +580,7 @@ export const authRouter = createTRPCRouter({
 
         if (failedLoginUser.tenantId) {
           await createAuditEvent({
+            db: ctx.db,
             tenantId: failedLoginUser.tenantId,
             actorUserId: failedLoginUser.userId,
             actionType: "login_failed",
@@ -738,6 +741,7 @@ export const authRouter = createTRPCRouter({
 
       if (passwordResetUser.tenantId) {
         await createAuditEvent({
+          db: ctx.db,
           tenantId: passwordResetUser.tenantId,
           actorUserId: passwordResetUser.userId,
           actionType: "password_reset_completed",
@@ -812,6 +816,7 @@ export const authRouter = createTRPCRouter({
 
       if (userRecord?.defaultTenantId) {
         await createAuditEvent({
+          db: ctx.db,
           tenantId: userRecord.defaultTenantId,
           actorUserId: logoutUserId,
           actionType: "logout",
@@ -873,6 +878,10 @@ export const authRouter = createTRPCRouter({
     .output(updateTenantMemberRoleOutputSchema)
     .mutation(async ({ ctx, input }) => {
       const tenantId = ctx.tenantId!;
+      type RoleUpdateTransactionResult =
+        | { forbidden: true; auditData: Omit<Parameters<typeof createAuditEvent>[0], "db"> }
+        | { targetUserId: string; previousRole: TenantRole; nextRole: TenantRole; roleChanged: boolean };
+
       const mutationResult = await ctx.db.transaction(async (tx) => {
         await lockTenantMembershipsForUpdate({ tenantId, db: tx });
 
@@ -897,25 +906,22 @@ export const authRouter = createTRPCRouter({
             "Forbidden role update attempt"
           );
 
-          // Persist audit event for forbidden attempt
-          await createAuditEvent({
-            tenantId,
-            actorUserId: ctx.session.user.id,
-            actionType: "forbidden_attempt",
-            targetType: "user",
-            targetId: input.memberUserId,
-            status: "failure",
-            context: JSON.stringify({
-              action: "role_update",
-              actorRole: actorMembershipInTx?.role,
-              requestedRole: input.role,
-            }),
-          });
-
-          throw new TRPCError({
-            code: "FORBIDDEN",
-            message: "Only Admins can change member roles.",
-          });
+          return {
+            forbidden: true as const,
+            auditData: {
+              tenantId,
+              actorUserId: ctx.session.user.id,
+              actionType: "forbidden_attempt" as const,
+              targetType: "user",
+              targetId: input.memberUserId,
+              status: "failure" as const,
+              context: JSON.stringify({
+                action: "role_update",
+                actorRole: actorMembershipInTx?.role,
+                requestedRole: input.role,
+              }),
+            },
+          };
         }
 
         const targetMembership = await tx.query.tenantMemberships.findFirst({
@@ -995,6 +1001,14 @@ export const authRouter = createTRPCRouter({
           roleChanged: true,
         };
       });
+
+      if (mutationResult.forbidden) {
+        await createAuditEvent({ db: ctx.db, ...mutationResult.auditData });
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only Admins can change member roles.",
+        });
+      }
 
       if (mutationResult.roleChanged) {
         logger.info(
@@ -1125,6 +1139,10 @@ export const authRouter = createTRPCRouter({
         }
       }
 
+      type MemberRemovalTransactionResult =
+        | { forbidden: true; auditData: Omit<Parameters<typeof createAuditEvent>[0], "db"> }
+        | { targetUserId: string; targetRole: TenantRole; sessionsInvalidated: boolean };
+
       const removalResult = await ctx.db.transaction(async (tx) => {
         await lockTenantMembershipsForUpdate({ tenantId, db: tx });
 
@@ -1149,24 +1167,21 @@ export const authRouter = createTRPCRouter({
             "Forbidden member removal attempt"
           );
 
-          // Persist audit event for forbidden attempt
-          await createAuditEvent({
-            tenantId,
-            actorUserId: ctx.session.user.id,
-            actionType: "forbidden_attempt",
-            targetType: "user",
-            targetId: input.memberUserId,
-            status: "failure",
-            context: JSON.stringify({
-              action: "member_remove",
-              actorRole: actorMembershipInTx?.role,
-            }),
-          });
-
-          throw new TRPCError({
-            code: "FORBIDDEN",
-            message: "Only Admins can remove members.",
-          });
+          return {
+            forbidden: true as const,
+            auditData: {
+              tenantId,
+              actorUserId: ctx.session.user.id,
+              actionType: "forbidden_attempt" as const,
+              targetType: "user",
+              targetId: input.memberUserId,
+              status: "failure" as const,
+              context: JSON.stringify({
+                action: "member_remove",
+                actorRole: actorMembershipInTx?.role,
+              }),
+            },
+          };
         }
 
         const targetMembershipInTx = await tx.query.tenantMemberships.findFirst({
@@ -1239,6 +1254,14 @@ export const authRouter = createTRPCRouter({
           sessionsInvalidated: shouldInvalidateSessions,
         };
       });
+
+      if (removalResult.forbidden) {
+        await createAuditEvent({ db: ctx.db, ...removalResult.auditData });
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only Admins can remove members.",
+        });
+      }
 
       if (isSelfRemoval) {
         ctx.responseHeaders.append("Set-Cookie", buildClearSessionCookie());
@@ -1362,6 +1385,7 @@ export const authRouter = createTRPCRouter({
 
         // Persist audit event for forbidden attempt
         await createAuditEvent({
+          db: ctx.db,
           tenantId,
           actorUserId: ctx.session.user.id,
           actionType: "forbidden_attempt",
@@ -1575,6 +1599,7 @@ export const authRouter = createTRPCRouter({
 
         // Persist audit event for forbidden attempt
         await createAuditEvent({
+          db: ctx.db,
           tenantId,
           actorUserId: ctx.session.user.id,
           actionType: "forbidden_attempt",

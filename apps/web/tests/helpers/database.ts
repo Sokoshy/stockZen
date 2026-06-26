@@ -1,3 +1,4 @@
+import { getTableName, is, Table } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
@@ -38,7 +39,7 @@ export async function cleanDatabase(db: ReturnType<typeof createTestDb>) {
   // would silently no-op the terminate and the deadlock would return. Excludes 'active'
   // intentionally so legitimate concurrent queries are never killed.
   // (uses: db.$client)
-  await client`
+  const terminateResult = await client<{ pg_terminate_backend: boolean }[]>`
     SELECT pg_terminate_backend(pid)
     FROM pg_stat_activity
     WHERE datname = current_database()
@@ -46,19 +47,17 @@ export async function cleanDatabase(db: ReturnType<typeof createTestDb>) {
       AND pid <> pg_backend_pid()
   `;
 
-  const tablesInDeleteOrder = [
-    "alerts",
-    "audit_events",
-    "stock_movements",
-    "products",
-    "tenant_invitations",
-    "tenant_memberships",
-    "tenants",
-    "session",
-    "account",
-    "verification",
-    "users",
-  ];
+  const terminated = terminateResult.map((row) => row.pg_terminate_backend);
+  if (terminated.length > 0 && !terminated.some((terminated) => terminated)) {
+    throw new Error(
+      `Found ${terminated.length} idle-in-transaction backend(s) but could not terminate any. ` +
+        "The test database role needs SUPERUSER or ownership of those sessions for pg_terminate_backend to work.",
+    );
+  }
+
+  const tablesInDeleteOrder = (Object.values(schema) as unknown[])
+    .filter((value): value is Table => is(value, Table))
+    .map((table) => getTableName(table));
 
   await client.unsafe(
     `TRUNCATE TABLE ${tablesInDeleteOrder.map((t) => `"${t}"`).join(", ")} CASCADE`,

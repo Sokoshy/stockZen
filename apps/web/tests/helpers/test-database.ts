@@ -13,12 +13,9 @@ export function getTestDatabaseUrl(): string {
   );
 }
 
-// Snapshot for callers that want a one-time resolved value (wiring stays simple).
-export const TEST_DATABASE_URL: string = getTestDatabaseUrl();
-
 export async function ensureTestDatabaseReady(): Promise<void> {
   const url = getTestDatabaseUrl();
-  const targetDatabaseName = "stockzen_test";
+  const targetDatabaseName = new URL(url).pathname.slice(1) || "stockzen_test";
 
   const maintenanceUrl = new URL(url);
   maintenanceUrl.pathname = "/postgres";
@@ -26,7 +23,6 @@ export async function ensureTestDatabaseReady(): Promise<void> {
   maintenanceUrl.hash = "";
 
   const admin = postgres(maintenanceUrl.toString(), { max: 1 });
-  // ponytail: target DB name fixed to stockzen_test; matches the default URL and init-db.sql.
   try {
     const exists = await admin<{ exists: boolean }[]>`
       SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = ${targetDatabaseName}) AS exists
