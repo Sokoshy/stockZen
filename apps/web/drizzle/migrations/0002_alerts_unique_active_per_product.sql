@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "idx_alerts_one_active_per_product" ON "alerts" USING btree ("tenant_id","product_id") WHERE "alerts"."status" = 'active';

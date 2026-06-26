@@ -5,6 +5,7 @@ import {
   products,
   session,
   tenantMemberships,
+  tenants,
   user,
 } from "~/server/db/schema";
 import {
@@ -114,6 +115,14 @@ export async function setTestTenantContext(tenantId: string): Promise<void> {
   await testDb.execute(
     sql`select set_config('app.tenant_id', ${tenantId}, false)`,
   );
+}
+
+export async function upgradeTenantPlan(
+  db: typeof testDb,
+  tenantId: string,
+  plan: "Free" | "Starter" | "Pro" = "Pro",
+): Promise<void> {
+  await db.update(tenants).set({ subscriptionPlan: plan }).where(eq(tenants.id, tenantId));
 }
 
 export async function createTenantContext(tenant: TestTenant): Promise<TenantContext> {

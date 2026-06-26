@@ -11,6 +11,7 @@ import {
   varchar,
   pgEnum,
   check,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 // ============================================
@@ -293,6 +294,9 @@ export const alerts = pgTable(
     ),
     index("idx_alerts_tenant_updated").on(table.tenantId, table.updatedAt),
     index("idx_alerts_product_id").on(table.productId),
+    uniqueIndex("idx_alerts_one_active_per_product")
+      .on(table.tenantId, table.productId)
+      .where(sql`"alerts"."status" = 'active'`),
   ]
 );
 

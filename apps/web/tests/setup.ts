@@ -14,11 +14,7 @@ process.env.BETTER_AUTH_GITHUB_REDIRECT_URI =
 process.env.TEST_DATABASE_URL =
   process.env.TEST_DATABASE_URL ??
   process.env.DATABASE_URL ??
-  "postgresql://postgres:password@localhost:5432/web_test";
+  "postgresql://postgres:password@localhost:5432/stockzen_test";
 process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
-
-import { ensureTestDatabaseReady } from "./helpers/ensure-test-database";
-
-await ensureTestDatabaseReady();
 
 import "@testing-library/jest-dom";

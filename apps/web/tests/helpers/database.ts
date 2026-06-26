@@ -1,17 +1,24 @@
+import { getTableName, is, Table } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
 import * as schema from "~/server/db/schema";
+import { getTestDatabaseUrl } from "./test-database";
 
 // Test database connection string (use a separate test database in production)
-const TEST_DATABASE_URL =
-  process.env.TEST_DATABASE_URL ??
-  "postgresql://postgres:password@localhost:5432/web_test";
+const TEST_DATABASE_URL = getTestDatabaseUrl();
+
+// ponytail: one shared connection for the whole worker process. Integration tests
+// are serial (fileParallelism:false on the integration vitest project), so a
+// single max:1 connection is enough and we never exhaust Postgres' pool.
+// Upgrade path: drop the singleton and add per-test DB isolation if you enable
+// parallel integration tests.
+let sharedClient: ReturnType<typeof postgres> | null = null;
 
 // Create a test database client
 export function createTestDb() {
-  const client = postgres(TEST_DATABASE_URL, { max: 1 });
-  return drizzle(client, { schema });
+  sharedClient ??= postgres(TEST_DATABASE_URL, { max: 1 });
+  return drizzle(sharedClient, { schema });
 }
 
 // Clean up tables before/after tests
@@ -19,109 +26,42 @@ export async function cleanDatabase(db: ReturnType<typeof createTestDb>) {
   const client = await db.$client;
 
   await client.unsafe(`ROLLBACK`).catch(() => {});
-  
-  // Reset tenant context to allow superuser to bypass RLS for cleanup
-  await client.unsafe(`RESET app.tenant_id`).catch(() => {});
 
-  await client.unsafe(`
-    DO $$
-    BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'audit_action_type') THEN
-        CREATE TYPE audit_action_type AS ENUM (
-          'login',
-          'logout',
-          'password_reset_completed',
-          'invite_created',
-          'invite_revoked',
-          'role_changed',
-          'member_removed',
-          'login_failed',
-          'forbidden_attempt'
-        );
-      END IF;
+  // Reset tenant context to allow superuser to bypass RLS for cleanup.
+  // RESET on an unset custom GUC never errors, so no catch here.
+  await client.unsafe(`RESET app.tenant_id`);
 
-      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'audit_status') THEN
-        CREATE TYPE audit_status AS ENUM ('success', 'failure');
-      END IF;
+  // Terminate backends left "idle in transaction" (incl. aborted, 25P02) on the test
+  // DB — e.g. the prod DB singleton (src/server/db/index.ts globalThis.conn) lingering
+  // after a tRPC mutation — so the TRUNCATE/CASCADE below can acquire ACCESS EXCLUSIVE.
+  // Serial integration tests => safe to terminate between tests (no in-flight query).
+  // ponytail: requires SUPERUSER (testDb connects as postgres); a non-superuser CI role
+  // would silently no-op the terminate and the deadlock would return. Excludes 'active'
+  // intentionally so legitimate concurrent queries are never killed.
+  // (uses: db.$client)
+  const terminateResult = await client<{ pg_terminate_backend: boolean }[]>`
+    SELECT pg_terminate_backend(pid)
+    FROM pg_stat_activity
+    WHERE datname = current_database()
+      AND state LIKE 'idle in transaction%'
+      AND pid <> pg_backend_pid()
+  `;
 
-      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'alert_level') THEN
-        CREATE TYPE alert_level AS ENUM ('red', 'orange', 'green');
-      END IF;
-
-      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'alert_status') THEN
-        CREATE TYPE alert_status AS ENUM ('active', 'closed');
-      END IF;
-    END
-    $$;
-  `);
-
-  await client.unsafe(`
-    CREATE TABLE IF NOT EXISTS "audit_events" (
-      "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      "tenant_id" uuid NOT NULL REFERENCES "tenants"("id") ON DELETE CASCADE,
-      "actor_user_id" text,
-      "action_type" audit_action_type NOT NULL,
-      "target_type" varchar(100),
-      "target_id" text,
-      "status" audit_status NOT NULL,
-      "context" text,
-      "created_at" timestamp with time zone DEFAULT now() NOT NULL
+  const terminated = terminateResult.map((row) => row.pg_terminate_backend);
+  if (terminated.length > 0 && !terminated.some((terminated) => terminated)) {
+    throw new Error(
+      `Found ${terminated.length} idle-in-transaction backend(s) but could not terminate any. ` +
+        "The test database role needs SUPERUSER or ownership of those sessions for pg_terminate_backend to work.",
     );
-  `);
-
-  await client.unsafe(`
-    CREATE TABLE IF NOT EXISTS "alerts" (
-      "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      "tenant_id" uuid NOT NULL REFERENCES "tenants"("id") ON DELETE CASCADE,
-      "product_id" uuid NOT NULL REFERENCES "products"("id") ON DELETE CASCADE,
-      "level" alert_level NOT NULL,
-      "status" alert_status NOT NULL DEFAULT 'active',
-      "stock_at_creation" integer NOT NULL,
-      "current_stock" integer NOT NULL,
-      "handled_at" timestamp with time zone,
-      "snoozed_until" timestamp with time zone,
-      "created_at" timestamp with time zone DEFAULT now() NOT NULL,
-      "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-      "closed_at" timestamp with time zone
-    );
-  `);
-
-  await client.unsafe(`
-    CREATE UNIQUE INDEX IF NOT EXISTS "idx_alerts_one_active_per_product" ON "alerts" ("tenant_id", "product_id") WHERE "status" = 'active';
-  `);
-
-  await client.unsafe(`
-    ALTER TABLE "alerts" ADD COLUMN IF NOT EXISTS "handled_at" timestamp with time zone;
-    ALTER TABLE "alerts" ADD COLUMN IF NOT EXISTS "snoozed_until" timestamp with time zone;
-  `);
-
-  const tablesInDeleteOrder = [
-    "alerts",
-    "audit_events",
-    "stock_movements",
-    "products",
-    "tenant_invitations",
-    "tenant_memberships",
-    "tenants",
-    "session",
-    "account",
-    "verification",
-    "users",
-    "user",
-  ];
-
-  // Delete in order to respect foreign key constraints.
-  // Some local test databases may not yet have newer tables.
-  for (const tableName of tablesInDeleteOrder) {
-    try {
-      await client.unsafe(`DELETE FROM "${tableName}"`);
-    } catch (error) {
-      const code = (error as { code?: string }).code;
-      if (code !== "42P01") {
-        throw error;
-      }
-    }
   }
+
+  const tablesInDeleteOrder = (Object.values(schema) as unknown[])
+    .filter((value): value is Table => is(value, Table))
+    .map((table) => getTableName(table));
+
+  await client.unsafe(
+    `TRUNCATE TABLE ${tablesInDeleteOrder.map((t) => `"${t}"`).join(", ")} CASCADE`,
+  );
 }
 
 // Generate unique test data

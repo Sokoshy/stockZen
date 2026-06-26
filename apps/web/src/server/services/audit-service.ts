@@ -1,6 +1,7 @@
-import { db } from "~/server/db";
 import { auditEvents, type NewAuditEvent } from "~/server/db/schema";
 import { logger } from "~/server/logger";
+
+type Database = Pick<typeof import("~/server/db").db, "insert">;
 
 export type AuditActionType =
   | "login"
@@ -23,6 +24,7 @@ export interface CreateAuditEventInput {
   targetId?: string;
   status: AuditStatus;
   context?: string;
+  db: Database;
 }
 
 const SENSITIVE_KEY_PATTERN = /(password|token|secret|key|credential|authorization)/i;
@@ -71,7 +73,7 @@ export async function createAuditEvent(input: CreateAuditEventInput): Promise<vo
   };
 
   try {
-    await db.insert(auditEvents).values(auditEvent);
+    await input.db.insert(auditEvents).values(auditEvent);
   } catch (error) {
     logger.warn(
       {
@@ -85,26 +87,3 @@ export async function createAuditEvent(input: CreateAuditEventInput): Promise<vo
   }
 }
 
-export async function createAuditEventWithContext(input: {
-  tenantId: string;
-  actorUserId?: string;
-  actionType: AuditActionType;
-  targetType?: string;
-  targetId?: string;
-  status: AuditStatus;
-  extraContext?: Record<string, unknown>;
-}): Promise<void> {
-  const context = input.extraContext
-    ? sanitizeContext(JSON.stringify(input.extraContext))
-    : undefined;
-
-  await createAuditEvent({
-    tenantId: input.tenantId,
-    actorUserId: input.actorUserId,
-    actionType: input.actionType,
-    targetType: input.targetType,
-    targetId: input.targetId,
-    status: input.status,
-    context,
-  });
-}
