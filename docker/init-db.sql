@@ -7,3 +7,6 @@ BEGIN
 END
 $$;
 ALTER ROLE stockzen_app SET search_path TO public;
+
+SELECT 'CREATE DATABASE stockzen_test'
+WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'stockzen_test')\gexec

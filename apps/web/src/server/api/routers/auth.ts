@@ -1011,6 +1011,7 @@ export const authRouter = createTRPCRouter({
 
         // Persist audit event
         await createAuditEvent({
+          db: ctx.db,
           tenantId,
           actorUserId: ctx.session.user.id,
           actionType: "role_changed",
@@ -1259,6 +1260,7 @@ export const authRouter = createTRPCRouter({
 
       // Persist audit event
       await createAuditEvent({
+        db: ctx.db,
         tenantId,
         actorUserId: ctx.session.user.id,
         actionType: "member_removed",
@@ -1522,6 +1524,7 @@ export const authRouter = createTRPCRouter({
 
       // Persist audit event
       await createAuditEvent({
+        db: ctx.db,
         tenantId,
         actorUserId: ctx.session.user.id,
         actionType: "invite_created",
@@ -1635,6 +1638,7 @@ export const authRouter = createTRPCRouter({
 
       // Persist audit event
       await createAuditEvent({
+        db: ctx.db,
         tenantId,
         actorUserId: ctx.session.user.id,
         actionType: "invite_revoked",

@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { createCaller } from "~/server/api/root";
@@ -10,6 +10,7 @@ import {
   cleanTestDatabase,
   createTestTenant,
   createTenantContext,
+  setTestTenantContext,
   testDb,
 } from "../helpers/tenant-test-factories";
 
@@ -98,18 +99,9 @@ describe("Tenant Isolation Hardening", () => {
         quantity: 5,
       });
 
-      await testDb.insert(alerts).values({
-        tenantId: tenantA.tenantId,
-        productId: productA.id as string,
-        level: "red",
-        status: "active",
-        stockAtCreation: 5,
-        currentStock: 5,
-      });
-
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const client = await (testDb as any).$client as {
-        unsafe: (sql: string, params?: unknown[]) => Promise<Record<string, unknown>[]>;
+        unsafe: (sql: string, params?: unknown[]) => Promise<Record<string, unknown>[]>
       };
 
       await client.unsafe("BEGIN");
@@ -174,14 +166,15 @@ describe("Tenant Isolation Hardening", () => {
         quantity: 5,
       });
 
-      const [insertedAlert] = await testDb.insert(alerts).values({
-        tenantId: tenantA.tenantId,
-        productId: productA.id as string,
-        level: "red",
-        status: "active",
-        stockAtCreation: 5,
-        currentStock: 5,
-      }).returning();
+      await setTestTenantContext(tenantA.tenantId);
+      const activeAlerts = await testDb.query.alerts.findMany({
+        where: and(
+          eq(alerts.tenantId, tenantA.tenantId),
+          eq(alerts.productId, productA.id as string),
+          eq(alerts.status, "active"),
+        ),
+      });
+      const insertedAlert = activeAlerts[0];
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const client = await (testDb as any).$client as {
@@ -214,14 +207,15 @@ describe("Tenant Isolation Hardening", () => {
         quantity: 5,
       });
 
-      const [insertedAlert] = await testDb.insert(alerts).values({
-        tenantId: tenantA.tenantId,
-        productId: productA.id as string,
-        level: "red",
-        status: "active",
-        stockAtCreation: 5,
-        currentStock: 5,
-      }).returning();
+      await setTestTenantContext(tenantA.tenantId);
+      const activeAlerts = await testDb.query.alerts.findMany({
+        where: and(
+          eq(alerts.tenantId, tenantA.tenantId),
+          eq(alerts.productId, productA.id as string),
+          eq(alerts.status, "active"),
+        ),
+      });
+      const insertedAlert = activeAlerts[0];
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const client = await (testDb as any).$client as {
@@ -252,15 +246,6 @@ describe("Tenant Isolation Hardening", () => {
         name: "Alert Product A via tRPC",
         price: 10,
         quantity: 5,
-      });
-
-      await testDb.insert(alerts).values({
-        tenantId: tenantA.tenantId,
-        productId: productA.id as string,
-        level: "red",
-        status: "active",
-        stockAtCreation: 5,
-        currentStock: 5,
       });
 
       const contextB = await createTenantContext(tenantB);

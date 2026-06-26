@@ -5,6 +5,7 @@ import {
   createUserWithMembership,
   getTestDb,
   cleanupTestData,
+  upgradeTenantPlan,
 } from "../helpers/tenant-test-factories";
 import { setupTestTRPCContext } from "../helpers/trpc-test-context";
 import { appRouter } from "~/server/api/root";
@@ -174,6 +175,7 @@ describe("Auth Audit Logs", () => {
     it("should create audit event on invitation creation", async () => {
       const { admin, tenant, sessionToken } = await createTenantWithAdmin("audit-invite-create-test");
       const db = await getTestDb();
+      await upgradeTenantPlan(db, tenant.id, "Pro");
 
       // Create invitation
       const caller = appRouter.createCaller(
@@ -204,6 +206,7 @@ describe("Auth Audit Logs", () => {
     it("should create audit event on invitation revocation", async () => {
       const { admin, tenant, sessionToken } = await createTenantWithAdmin("audit-invite-revoke-test");
       const db = await getTestDb();
+      await upgradeTenantPlan(db, tenant.id, "Pro");
 
       // Create invitation first
       const caller = appRouter.createCaller(
@@ -390,6 +393,7 @@ describe("Auth Audit Logs", () => {
       const { tenant: tenantA, sessionToken: tokenA } = await createTenantWithAdmin("audit-iso-a");
       const { tenant: tenantB, sessionToken: tokenB } = await createTenantWithAdmin("audit-iso-b");
       const db = await getTestDb();
+      await upgradeTenantPlan(db, tenantA.id, "Pro");
 
       // Create event in tenant A
       const callerA = appRouter.createCaller(

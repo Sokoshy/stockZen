@@ -23,6 +23,8 @@ export interface CreateAuditEventInput {
   targetId?: string;
   status: AuditStatus;
   context?: string;
+  // ponytail: optional DI; defaults to the module singleton
+  db?: typeof db;
 }
 
 const SENSITIVE_KEY_PATTERN = /(password|token|secret|key|credential|authorization)/i;
@@ -71,7 +73,8 @@ export async function createAuditEvent(input: CreateAuditEventInput): Promise<vo
   };
 
   try {
-    await db.insert(auditEvents).values(auditEvent);
+    const auditDb = input.db ?? db;
+    await auditDb.insert(auditEvents).values(auditEvent);
   } catch (error) {
     logger.warn(
       {

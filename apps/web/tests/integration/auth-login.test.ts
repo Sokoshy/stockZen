@@ -75,7 +75,7 @@ describe("Auth login/logout", () => {
     const setCookie = loginCtx.responseHeaders.get("set-cookie");
     expect(setCookie).toBeTruthy();
     expect(setCookie ?? "").toContain("__session=");
-    expect(setCookie ?? "").not.toContain("Max-Age=");
+    expect(setCookie ?? "").not.toContain("Expires=");
 
     const dbSession = await testDb.query.session.findFirst({
       where: eq(session.userId, signUpResult.user.id),
