@@ -5,6 +5,7 @@ import { and, eq, sql } from "drizzle-orm";
 
 import { createCaller } from "~/server/api/root";
 import { createTRPCContext } from "~/server/api/trpc";
+import { auth } from "~/server/better-auth";
 import { tenantInvitations, tenantMemberships, tenants, user } from "~/server/db/schema";
 import {
   cleanDatabase,
@@ -376,6 +377,43 @@ describe("Auth invitations", () => {
       });
 
       expect(membership?.role).toBe("Manager");
+    });
+
+    it("un-consumes invitation and creates no user when signUpEmail fails", async () => {
+      const admin = await signUpUser("Admin");
+      const { caller } = await createProtectedCaller(admin.cookie, nextIp());
+
+      const invitedEmail = generateTestEmail();
+      const { result, token } = await createInvitationWithKnownToken(caller, {
+        email: invitedEmail,
+        role: "Manager",
+      });
+
+      const signUpEmailSpy = vi
+        .spyOn(auth.api, "signUpEmail")
+        .mockRejectedValueOnce(new Error("signUpEmail boom"));
+
+      try {
+        await expect(
+          caller.auth.acceptInvitation({
+            token,
+            password: "Password123",
+            confirmPassword: "Password123",
+          })
+        ).rejects.toThrow();
+
+        const invitation = await testDb.query.tenantInvitations.findFirst({
+          where: eq(tenantInvitations.id, result.invitation!.id),
+        });
+        expect(invitation?.usedAt).toBeNull();
+
+        const invitedUser = await testDb.query.user.findFirst({
+          where: eq(user.email, invitedEmail.toLowerCase()),
+        });
+        expect(invitedUser).toBeUndefined();
+      } finally {
+        signUpEmailSpy.mockRestore();
+      }
     });
 
     it("prevents invitation token replay after first accept", async () => {

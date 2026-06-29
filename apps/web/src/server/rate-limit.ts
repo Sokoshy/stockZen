@@ -1,3 +1,8 @@
+import { sql } from "drizzle-orm";
+
+import { db } from "~/server/db";
+import { rateLimits } from "~/server/db/schema";
+
 type RateLimitOptions = {
   limit: number;
   windowMs: number;
@@ -8,20 +13,6 @@ type RateLimitResult = {
   remaining: number;
   resetAt: number;
 };
-
-type RateLimitEntry = {
-  count: number;
-  resetAt: number;
-};
-
-const globalForRateLimit = globalThis as unknown as {
-  rateLimitStore?: Map<string, RateLimitEntry>;
-};
-
-const rateLimitStore = globalForRateLimit.rateLimitStore ?? new Map<string, RateLimitEntry>();
-if (!globalForRateLimit.rateLimitStore) {
-  globalForRateLimit.rateLimitStore = rateLimitStore;
-}
 
 export function getClientIp(headers: Headers): string {
   const forwardedFor = headers.get("x-forwarded-for");
@@ -36,37 +27,41 @@ export function getClientIp(headers: Headers): string {
   );
 }
 
-export function rateLimit(
+// ponytail: pas de cron vacuum ; reset paresseux. Ajouter si la table grossit.
+export async function rateLimit(
   identifier: string,
   options: RateLimitOptions
-): RateLimitResult {
-  const now = Date.now();
-  const entry = rateLimitStore.get(identifier);
+): Promise<RateLimitResult> {
+  const now = new Date();
+  const nextResetAt = new Date(now.getTime() + options.windowMs);
+  const nowIso = now.toISOString();
+  const nextResetIso = nextResetAt.toISOString();
 
-  if (!entry || entry.resetAt <= now) {
-    const resetAt = now + options.windowMs;
-    rateLimitStore.set(identifier, { count: 1, resetAt });
+  const rows = await db
+    .insert(rateLimits)
+    .values({ key: identifier, count: 1, resetAt: nextResetAt })
+    .onConflictDoUpdate({
+      target: rateLimits.key,
+      set: {
+        count: sql`CASE WHEN ${rateLimits.resetAt} <= ${nowIso}::timestamptz THEN 1 ELSE ${rateLimits.count} + 1 END`,
+        resetAt: sql`CASE WHEN ${rateLimits.resetAt} <= ${nowIso}::timestamptz THEN ${nextResetIso}::timestamptz ELSE ${rateLimits.resetAt} END`,
+      },
+    })
+    .returning({ count: rateLimits.count, resetAt: rateLimits.resetAt });
+
+  const row = rows[0];
+  if (!row) {
     return {
       allowed: true,
       remaining: Math.max(0, options.limit - 1),
-      resetAt,
+      resetAt: nextResetAt.getTime(),
     };
   }
 
-  if (entry.count >= options.limit) {
-    return {
-      allowed: false,
-      remaining: 0,
-      resetAt: entry.resetAt,
-    };
-  }
-
-  entry.count += 1;
-  rateLimitStore.set(identifier, entry);
-
+  const count = row.count;
   return {
-    allowed: true,
-    remaining: Math.max(0, options.limit - entry.count),
-    resetAt: entry.resetAt,
+    allowed: count <= options.limit,
+    remaining: Math.max(0, options.limit - count),
+    resetAt: row.resetAt.getTime(),
   };
 }

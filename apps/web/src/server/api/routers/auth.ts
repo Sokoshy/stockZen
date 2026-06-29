@@ -275,7 +275,7 @@ export const authRouter = createTRPCRouter({
       const { email, password, tenantName, rememberMe } = input;
 
       const rateKey = `sign-up:${getClientIp(ctx.headers)}`;
-      const rateResult = rateLimit(rateKey, { limit: 5, windowMs: 60_000 });
+      const rateResult = await rateLimit(rateKey, { limit: 5, windowMs: 60_000 });
       if (!rateResult.allowed) {
         throw new TRPCError({
           code: "TOO_MANY_REQUESTS",
@@ -447,7 +447,7 @@ export const authRouter = createTRPCRouter({
       const clientIp = getClientIp(ctx.headers);
 
       const rateKey = `login:${clientIp}`;
-      const rateResult = rateLimit(rateKey, { limit: 5, windowMs: 60_000 });
+      const rateResult = await rateLimit(rateKey, { limit: 5, windowMs: 60_000 });
       if (!rateResult.allowed) {
         logger.warn({ event: "audit.auth.login.rate_limited", clientIp }, "Login rate limit exceeded");
         throw new TRPCError({
@@ -615,7 +615,7 @@ export const authRouter = createTRPCRouter({
       const clientIp = getClientIp(ctx.headers);
 
       const rateKey = `password-reset-request:${clientIp}`;
-      const rateResult = rateLimit(rateKey, PASSWORD_RESET_REQUEST_RATE_LIMIT);
+      const rateResult = await rateLimit(rateKey, PASSWORD_RESET_REQUEST_RATE_LIMIT);
       if (!rateResult.allowed) {
         logger.warn(
           {
@@ -679,7 +679,7 @@ export const authRouter = createTRPCRouter({
       const clientIp = getClientIp(ctx.headers);
 
       const rateKey = `password-reset-submit:${clientIp}`;
-      const rateResult = rateLimit(rateKey, PASSWORD_RESET_SUBMIT_RATE_LIMIT);
+      const rateResult = await rateLimit(rateKey, PASSWORD_RESET_SUBMIT_RATE_LIMIT);
       if (!rateResult.allowed) {
         logger.warn(
           {
@@ -1798,196 +1798,242 @@ export const authRouter = createTRPCRouter({
           }
         | undefined;
 
-      try {
-        result = await ctx.db.transaction(async (tx) => {
-          await setInvitationTokenContext(tokenHash, tx);
-
-          const invitation = await tx.query.tenantInvitations.findFirst({
-            where: eq(tenantInvitations.tokenHash, tokenHash),
+      // Best-effort compensation: clear usedAt so a failed accept leaves the
+      // invitation reusable. Tx1 already committed the consume, so un-consume
+      // runs in its own tx with the invitation-token RLS context.
+      const unConsumeInvitation = async (invitationId: string) => {
+        try {
+          await ctx.db.transaction(async (tx) => {
+            await setInvitationTokenContext(tokenHash, tx);
+            await tx
+              .update(tenantInvitations)
+              .set({ usedAt: null })
+              .where(eq(tenantInvitations.id, invitationId));
           });
+        } catch (cleanupError) {
+          logger.error(
+            {
+              event: "audit.auth.invitation.accept.cleanup.failed",
+              invitationId,
+              reason:
+                cleanupError instanceof Error
+                  ? cleanupError.message
+                  : "unknown",
+            },
+            "Failed to un-consume invitation after invitation accept failure"
+          );
+        }
+      };
 
-          if (!invitation) {
-            logger.warn(
-              {
-                event: "audit.auth.invitation.accept.rejected",
-                reason: "invalid_or_missing",
-                clientIp,
-              },
-              "Invitation accept rejected"
-            );
-            throw new TRPCError({
-              code: "NOT_FOUND",
-              message:
-                "This invitation link is invalid or has expired. Please request a new invitation from an Admin.",
-            });
-          }
+      // Tx1 (commit): validate and atomically consume the token. signUpEmail
+      // must run outside any tx because drizzleAdapter is bound to the db
+      // singleton, not to tx — so user/account/session writes would escape an
+      // open transaction. Validation errors here roll Tx1 back, leaving the
+      // invitation unconsumed, so no compensation is needed for them.
+      const consumedInvitation = await ctx.db.transaction(async (tx) => {
+        await setInvitationTokenContext(tokenHash, tx);
 
-          if (invitation.usedAt) {
-            logger.info(
-              {
-                event: "audit.auth.invitation.accept.rejected",
-                reason: "used",
-                invitationId: invitation.id,
-                clientIp,
-              },
-              "Invitation accept rejected"
-            );
-            throw new TRPCError({
-              code: "CONFLICT",
-              message:
-                "This invitation has already been used. Please request a new invitation from an Admin.",
-            });
-          }
+        const invitation = await tx.query.tenantInvitations.findFirst({
+          where: eq(tenantInvitations.tokenHash, tokenHash),
+        });
 
-          if (invitation.revokedAt) {
-            logger.info(
-              {
-                event: "audit.auth.invitation.accept.rejected",
-                reason: "revoked",
-                invitationId: invitation.id,
-                clientIp,
-              },
-              "Invitation accept rejected"
-            );
-            throw new TRPCError({
-              code: "CONFLICT",
-              message:
-                "This invitation has been revoked. Please request a new invitation from an Admin.",
-            });
-          }
+        if (!invitation) {
+          logger.warn(
+            {
+              event: "audit.auth.invitation.accept.rejected",
+              reason: "invalid_or_missing",
+              clientIp,
+            },
+            "Invitation accept rejected"
+          );
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message:
+              "This invitation link is invalid or has expired. Please request a new invitation from an Admin.",
+          });
+        }
 
-          if (invitation.expiresAt < new Date()) {
-            logger.info(
-              {
-                event: "audit.auth.invitation.accept.rejected",
-                reason: "expired",
-                invitationId: invitation.id,
-                clientIp,
-              },
-              "Invitation accept rejected"
-            );
-            throw new TRPCError({
-              code: "CONFLICT",
-              message:
-                "This invitation has expired. Please request a new invitation from an Admin.",
-            });
-          }
+        if (invitation.usedAt) {
+          logger.info(
+            {
+              event: "audit.auth.invitation.accept.rejected",
+              reason: "used",
+              invitationId: invitation.id,
+              clientIp,
+            },
+            "Invitation accept rejected"
+          );
+          throw new TRPCError({
+            code: "CONFLICT",
+            message:
+              "This invitation has already been used. Please request a new invitation from an Admin.",
+          });
+        }
 
-          // Atomically consume token in this transaction before continuing. If
-          // another request consumed it first, no row is returned.
-          const consumedAt = new Date();
-          const [consumedInvitation] = await tx
-            .update(tenantInvitations)
-            .set({ usedAt: consumedAt })
-            .where(
-              and(
-                eq(tenantInvitations.id, invitation.id),
-                isNull(tenantInvitations.usedAt),
-                isNull(tenantInvitations.revokedAt),
-                gt(tenantInvitations.expiresAt, consumedAt)
-              )
+        if (invitation.revokedAt) {
+          logger.info(
+            {
+              event: "audit.auth.invitation.accept.rejected",
+              reason: "revoked",
+              invitationId: invitation.id,
+              clientIp,
+            },
+            "Invitation accept rejected"
+          );
+          throw new TRPCError({
+            code: "CONFLICT",
+            message:
+              "This invitation has been revoked. Please request a new invitation from an Admin.",
+          });
+        }
+
+        if (invitation.expiresAt < new Date()) {
+          logger.info(
+            {
+              event: "audit.auth.invitation.accept.rejected",
+              reason: "expired",
+              invitationId: invitation.id,
+              clientIp,
+            },
+            "Invitation accept rejected"
+          );
+          throw new TRPCError({
+            code: "CONFLICT",
+            message:
+              "This invitation has expired. Please request a new invitation from an Admin.",
+          });
+        }
+
+        // Atomically consume token in this transaction before continuing. If
+        // another request consumed it first, no row is returned.
+        const consumedAt = new Date();
+        const [consumed] = await tx
+          .update(tenantInvitations)
+          .set({ usedAt: consumedAt })
+          .where(
+            and(
+              eq(tenantInvitations.id, invitation.id),
+              isNull(tenantInvitations.usedAt),
+              isNull(tenantInvitations.revokedAt),
+              gt(tenantInvitations.expiresAt, consumedAt)
             )
-            .returning({
-              id: tenantInvitations.id,
-              tenantId: tenantInvitations.tenantId,
-              email: tenantInvitations.email,
-              role: tenantInvitations.role,
-            });
-
-          if (!consumedInvitation) {
-            logger.warn(
-              {
-                event: "audit.auth.invitation.accept.rejected",
-                reason: "already_consumed_or_invalid_state",
-                invitationId: invitation.id,
-                clientIp,
-              },
-              "Invitation accept rejected due to token race"
-            );
-            throw new TRPCError({
-              code: "CONFLICT",
-              message:
-                "This invitation has already been used. Please request a new invitation from an Admin.",
-            });
-          }
-
-          const existingUser = await tx.query.user.findFirst({
-            where: eq(user.email, consumedInvitation.email),
+          )
+          .returning({
+            id: tenantInvitations.id,
+            tenantId: tenantInvitations.tenantId,
+            email: tenantInvitations.email,
+            role: tenantInvitations.role,
           });
 
-          let userId: string;
+        if (!consumed) {
+          logger.warn(
+            {
+              event: "audit.auth.invitation.accept.rejected",
+              reason: "already_consumed_or_invalid_state",
+              invitationId: invitation.id,
+              clientIp,
+            },
+            "Invitation accept rejected due to token race"
+          );
+          throw new TRPCError({
+            code: "CONFLICT",
+            message:
+              "This invitation has already been used. Please request a new invitation from an Admin.",
+          });
+        }
 
-          if (existingUser) {
-            const existingMembership = await tx.query.tenantMemberships.findFirst({
-              where: and(
-                eq(tenantMemberships.tenantId, consumedInvitation.tenantId),
-                eq(tenantMemberships.userId, existingUser.id)
-              ),
-            });
+        return consumed;
+      });
 
-            if (existingMembership) {
-              logger.info(
-                {
-                  event: "audit.auth.invitation.accept.rejected",
-                  reason: "already_member",
-                  invitationId: consumedInvitation.id,
-                  tenantId: consumedInvitation.tenantId,
-                  userId: existingUser.id,
-                  clientIp,
-                },
-                "Invitation accept rejected"
-              );
-              throw new TRPCError({
-                code: "CONFLICT",
-                message: "You are already a member of this tenant.",
-              });
-            }
+      // Resolve user outside any transaction. user has no RLS, so ctx.db is
+      // safe here. signUpEmail writes through drizzleAdapter (bound to db),
+      // so it cannot run inside a tx.
+      let userId: string;
+      let isNewUser: boolean;
 
-            userId = existingUser.id;
-          } else {
-            const userName =
-              consumedInvitation.email.split("@")[0] ?? consumedInvitation.email;
-            const signUpResult = await auth.api.signUpEmail({
-              body: {
-                email: consumedInvitation.email,
-                password: input.password,
-                name: userName,
-                callbackURL: "/dashboard",
-              },
-              headers: ctx.headers,
-            });
+      const existingUser = await ctx.db.query.user.findFirst({
+        where: eq(user.email, consumedInvitation.email),
+      });
 
-            if (!signUpResult?.user?.id) {
-              throw new TRPCError({
-                code: "INTERNAL_SERVER_ERROR",
-                message: "Failed to create user account.",
-              });
-            }
+      if (existingUser) {
+        const existingMembership = await ctx.db.query.tenantMemberships.findFirst({
+          where: and(
+            eq(tenantMemberships.tenantId, consumedInvitation.tenantId),
+            eq(tenantMemberships.userId, existingUser.id)
+          ),
+        });
 
-            userId = signUpResult.user.id;
-            createdUserId = userId;
-          }
+        if (existingMembership) {
+          logger.info(
+            {
+              event: "audit.auth.invitation.accept.rejected",
+              reason: "already_member",
+              invitationId: consumedInvitation.id,
+              tenantId: consumedInvitation.tenantId,
+              userId: existingUser.id,
+              clientIp,
+            },
+            "Invitation accept rejected"
+          );
+          await unConsumeInvitation(consumedInvitation.id);
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "You are already a member of this tenant.",
+          });
+        }
 
+        userId = existingUser.id;
+        isNewUser = false;
+      } else {
+        const userName =
+          consumedInvitation.email.split("@")[0] ?? consumedInvitation.email;
+        let signUpResult: Awaited<ReturnType<typeof auth.api.signUpEmail>>;
+
+        try {
+          signUpResult = await auth.api.signUpEmail({
+            body: {
+              email: consumedInvitation.email,
+              password: input.password,
+              name: userName,
+              callbackURL: "/dashboard",
+            },
+            headers: ctx.headers,
+          });
+        } catch (signUpError) {
+          await unConsumeInvitation(consumedInvitation.id);
+          throw signUpError;
+        }
+
+        if (!signUpResult?.user?.id) {
+          await unConsumeInvitation(consumedInvitation.id);
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Failed to create user account.",
+          });
+        }
+
+        userId = signUpResult.user.id;
+        createdUserId = userId;
+        isNewUser = true;
+      }
+
+      // Tx2 (commit): tenant-scoped membership + default tenant. On failure,
+      // compensate by deleting the newly-created user and un-consuming the
+      // invitation so the token is reusable.
+      try {
+        await ctx.db.transaction(async (tx) => {
           await setTenantContext(consumedInvitation.tenantId, tx);
-
           await tx.insert(tenantMemberships).values({
             tenantId: consumedInvitation.tenantId,
             userId,
             role: consumedInvitation.role,
           });
-
           await tx
             .update(user)
             .set({ defaultTenantId: consumedInvitation.tenantId })
             .where(eq(user.id, userId));
-
-          return {
-            userId,
-            tenantId: consumedInvitation.tenantId,
-            isNewUser: !existingUser,
-          };
         });
-      } catch (error) {
+      } catch (tx2Error) {
         if (createdUserId) {
           try {
             await ctx.db.delete(user).where(eq(user.id, createdUserId));
@@ -2005,9 +2051,11 @@ export const authRouter = createTRPCRouter({
             );
           }
         }
-
-        throw error;
+        await unConsumeInvitation(consumedInvitation.id);
+        throw tx2Error;
       }
+
+      result = { userId, tenantId: consumedInvitation.tenantId, isNewUser };
 
       if (!result) {
         throw new TRPCError({
