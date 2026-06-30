@@ -129,7 +129,9 @@ export const tenantMemberships = pgTable("tenant_memberships", {
   createdAt: timestamp("created_at", { withTimezone: true })
     .$defaultFn(() => new Date())
     .notNull(),
-});
+}, (table) => [
+  uniqueIndex("idx_tenant_memberships_tenant_user").on(table.tenantId, table.userId),
+]);
 
 export const tenantInvitations = pgTable("tenant_invitations", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -165,6 +167,7 @@ export const auditActionTypeEnum = pgEnum("audit_action_type", [
   "password_reset_completed",
   "invite_created",
   "invite_revoked",
+  "invite_accepted",
   "role_changed",
   "member_removed",
   "login_failed",
@@ -330,6 +333,19 @@ export const stockMovements = pgTable(
 );
 
 // ============================================
+// Rate Limiting Table
+// ============================================
+
+export const rateLimits = pgTable("rate_limits", {
+  key: varchar("key", { length: 255 }).primaryKey(),
+  count: integer("count").notNull(),
+  resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+// ============================================
 // Relations
 // ============================================
 
@@ -443,3 +459,5 @@ export type StockMovement = typeof stockMovements.$inferSelect;
 export type NewStockMovement = typeof stockMovements.$inferInsert;
 export type Alert = typeof alerts.$inferSelect;
 export type NewAlert = typeof alerts.$inferInsert;
+export type RateLimit = typeof rateLimits.$inferSelect;
+export type NewRateLimit = typeof rateLimits.$inferInsert;

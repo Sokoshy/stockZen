@@ -68,8 +68,6 @@ async function insertSession(
 describe("session-lifecycle", () => {
   beforeEach(async () => {
     await cleanDatabase(testDb);
-    // Clear rate limit store to avoid "Too many sign up attempts" across tests
-    (globalThis as unknown as { rateLimitStore?: Map<unknown, unknown> }).rateLimitStore?.clear();
   });
 
   // ─── applyRememberMeExtension ────────────────────────────────────

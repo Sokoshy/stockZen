@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { and, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 import {
   loginResponseSchema,
@@ -33,21 +33,15 @@ import {
   revokeInvitationInputSchema,
   revokeInvitationResponseSchema,
 } from "~/schemas/tenant-invitations";
-import { createTRPCRouter, membershipProcedure, protectedProcedure, publicProcedure } from "~/server/api/trpc";
-import {
-  canManageTenantMembers,
-  createSelfRemovalConfirmToken,
-  validateMemberRemovalPolicy,
-  validateRoleChangePolicy,
-  verifySelfRemovalConfirmToken,
-} from "~/server/auth/rbac-policy";
+import { adminProcedure, createTRPCRouter, membershipProcedure, protectedProcedure, publicProcedure } from "~/server/api/trpc";
+import { invitationService } from "~/server/services/invitation-service";
+import { membershipService } from "~/server/services/membership-service";
+
 import { auth } from "~/server/better-auth";
 import {
   getTrustedPasswordResetRedirectUrl,
 } from "~/server/better-auth/password-reset-email";
-import {
-  queueInvitationEmail,
-} from "~/server/better-auth/invitation-email";
+
 import {
   buildClearSessionCookie,
   extractSessionToken,
@@ -55,7 +49,6 @@ import {
 import {
   applyRememberMeExtension,
   destroySession,
-  globallyInvalidateAllUserSessions,
   setSessionCookieAfterAuth,
 } from "~/server/lib/session-lifecycle";
 import {
@@ -63,10 +56,9 @@ import {
   isInvalidResetTokenError,
 } from "~/server/better-auth/password-reset-errors";
 import { db as rootDb } from "~/server/db";
-import { setInvitationTokenContext, setTenantContext } from "~/server/db/rls";
+import { setTenantContext } from "~/server/db/rls";
 import {
   session,
-  tenantInvitations,
   tenantMemberships,
   tenants,
   user,
@@ -75,12 +67,6 @@ import {
 import { logger } from "~/server/logger";
 import { getClientIp, rateLimit } from "~/server/rate-limit";
 import { createAuditEvent } from "~/server/services/audit-service";
-import type { TenantRole } from "~/schemas/team-membership";
-import {
-  BILLING_UPGRADE_ROUTE,
-  checkUserLimit,
-  lockTenantSubscription,
-} from "~/server/services/subscription-service";
 
 const GENERIC_LOGIN_ERROR = "Invalid email or password";
 const GENERIC_PASSWORD_RESET_REQUEST_RESPONSE =
@@ -213,50 +199,6 @@ async function getUserAuditContextFromPasswordResetToken(input: {
   };
 }
 
-async function countTenantAdmins(input: {
-  tenantId: string;
-  db: Pick<typeof rootDb, "query">;
-}) {
-  const adminMemberships = await input.db.query.tenantMemberships.findMany({
-    columns: {
-      userId: true,
-    },
-    where: and(eq(tenantMemberships.tenantId, input.tenantId), eq(tenantMemberships.role, "Admin")),
-  });
-
-  return adminMemberships.length;
-}
-
-async function lockTenantMembershipsForUpdate(input: {
-  tenantId: string;
-  db: Pick<typeof rootDb, "execute">;
-}) {
-  await input.db.execute(sql`
-    select ${tenantMemberships.id}
-    from ${tenantMemberships}
-    where ${tenantMemberships.tenantId} = ${input.tenantId}
-    for update
-  `);
-}
-
-function assertTenantHasAdminOrThrow(adminCount: number) {
-  if (adminCount < 1) {
-    throw new TRPCError({
-      code: "FORBIDDEN",
-      message: "Tenant must always retain at least one Admin.",
-    });
-  }
-}
-
-function isUniqueConstraintViolation(error: unknown): boolean {
-  if (!error || typeof error !== "object") {
-    return false;
-  }
-
-  const errorWithCode = error as { code?: string };
-  return errorWithCode.code === "23505";
-}
-
 export const authRouter = createTRPCRouter({
   /**
    * Sign up a new user with tenant creation
@@ -274,8 +216,8 @@ export const authRouter = createTRPCRouter({
     .mutation(async ({ input, ctx }) => {
       const { email, password, tenantName, rememberMe } = input;
 
-      const rateKey = `sign-up:${getClientIp(ctx.headers)}`;
-      const rateResult = rateLimit(rateKey, { limit: 5, windowMs: 60_000 });
+      const rateKey = `global:ip:${getClientIp(ctx.headers)}:sign-up`;
+      const rateResult = await rateLimit(ctx.db, rateKey, { limit: 5, windowMs: 60_000 });
       if (!rateResult.allowed) {
         throw new TRPCError({
           code: "TOO_MANY_REQUESTS",
@@ -446,8 +388,8 @@ export const authRouter = createTRPCRouter({
       const { email, password, rememberMe } = input;
       const clientIp = getClientIp(ctx.headers);
 
-      const rateKey = `login:${clientIp}`;
-      const rateResult = rateLimit(rateKey, { limit: 5, windowMs: 60_000 });
+      const rateKey = `global:ip:${clientIp}:login`;
+      const rateResult = await rateLimit(ctx.db, rateKey, { limit: 5, windowMs: 60_000 });
       if (!rateResult.allowed) {
         logger.warn({ event: "audit.auth.login.rate_limited", clientIp }, "Login rate limit exceeded");
         throw new TRPCError({
@@ -614,8 +556,8 @@ export const authRouter = createTRPCRouter({
     .mutation(async ({ input, ctx }) => {
       const clientIp = getClientIp(ctx.headers);
 
-      const rateKey = `password-reset-request:${clientIp}`;
-      const rateResult = rateLimit(rateKey, PASSWORD_RESET_REQUEST_RATE_LIMIT);
+      const rateKey = `global:ip:${clientIp}:password-reset-request`;
+      const rateResult = await rateLimit(ctx.db, rateKey, PASSWORD_RESET_REQUEST_RATE_LIMIT);
       if (!rateResult.allowed) {
         logger.warn(
           {
@@ -678,8 +620,8 @@ export const authRouter = createTRPCRouter({
     .mutation(async ({ input, ctx }) => {
       const clientIp = getClientIp(ctx.headers);
 
-      const rateKey = `password-reset-submit:${clientIp}`;
-      const rateResult = rateLimit(rateKey, PASSWORD_RESET_SUBMIT_RATE_LIMIT);
+      const rateKey = `global:ip:${clientIp}:password-reset-submit`;
+      const rateResult = await rateLimit(ctx.db, rateKey, PASSWORD_RESET_SUBMIT_RATE_LIMIT);
       if (!rateResult.allowed) {
         logger.warn(
           {
@@ -837,37 +779,7 @@ export const authRouter = createTRPCRouter({
   listTenantMembers: membershipProcedure
     .output(listTenantMembersOutputSchema)
     .query(async ({ ctx }) => {
-      const tenantId = ctx.tenantId!;
-
-      const memberships = await ctx.db.query.tenantMemberships.findMany({
-        columns: {
-          userId: true,
-          role: true,
-          createdAt: true,
-        },
-        where: eq(tenantMemberships.tenantId, tenantId),
-        with: {
-          user: {
-            columns: {
-              id: true,
-              email: true,
-              name: true,
-            },
-          },
-        },
-      });
-
-      return {
-        actorRole: ctx.membership.role,
-        members: memberships.map((membership) => ({
-          userId: membership.userId,
-          email: membership.user.email,
-          name: membership.user.name,
-          role: membership.role,
-          joinedAt: membership.createdAt.toISOString(),
-          isCurrentUser: membership.userId === ctx.session.user.id,
-        })),
-      };
+      return membershipService.listTenantMembers(ctx.db, ctx.tenantId!, ctx.membership.role, ctx.session.user.id);
     }),
 
   /**
@@ -877,174 +789,7 @@ export const authRouter = createTRPCRouter({
     .input(updateTenantMemberRoleInputSchema)
     .output(updateTenantMemberRoleOutputSchema)
     .mutation(async ({ ctx, input }) => {
-      const tenantId = ctx.tenantId!;
-      type RoleUpdateTransactionResult =
-        | { forbidden: true; auditData: Omit<Parameters<typeof createAuditEvent>[0], "db"> }
-        | { targetUserId: string; previousRole: TenantRole; nextRole: TenantRole; roleChanged: boolean };
-
-      const mutationResult = await ctx.db.transaction(async (tx) => {
-        await lockTenantMembershipsForUpdate({ tenantId, db: tx });
-
-        const actorMembershipInTx = await tx.query.tenantMemberships.findFirst({
-          columns: { role: true },
-          where: and(
-            eq(tenantMemberships.tenantId, tenantId),
-            eq(tenantMemberships.userId, ctx.session.user.id),
-          ),
-        });
-
-        if (!actorMembershipInTx || !canManageTenantMembers(actorMembershipInTx.role)) {
-          logger.warn(
-            {
-              event: "audit.auth.team_member.role_update.forbidden",
-              actorUserId: ctx.session.user.id,
-              tenantId,
-              actorRole: actorMembershipInTx?.role,
-              targetUserId: input.memberUserId,
-              targetRole: input.role,
-            },
-            "Forbidden role update attempt"
-          );
-
-          return {
-            forbidden: true as const,
-            auditData: {
-              tenantId,
-              actorUserId: ctx.session.user.id,
-              actionType: "forbidden_attempt" as const,
-              targetType: "user",
-              targetId: input.memberUserId,
-              status: "failure" as const,
-              context: JSON.stringify({
-                action: "role_update",
-                actorRole: actorMembershipInTx?.role,
-                requestedRole: input.role,
-              }),
-            },
-          };
-        }
-
-        const targetMembership = await tx.query.tenantMemberships.findFirst({
-          columns: {
-            tenantId: true,
-            userId: true,
-            role: true,
-          },
-          where: and(
-            eq(tenantMemberships.tenantId, tenantId),
-            eq(tenantMemberships.userId, input.memberUserId)
-          ),
-        });
-
-        if (!targetMembership) {
-          throw new TRPCError({
-            code: "NOT_FOUND",
-            message: "Member not found in this tenant.",
-          });
-        }
-
-        const adminCount = await countTenantAdmins({ tenantId, db: tx });
-        const policyResult = validateRoleChangePolicy({
-          actorUserId: ctx.session.user.id,
-          targetUserId: targetMembership.userId,
-          currentRole: targetMembership.role,
-          nextRole: input.role,
-          adminCount,
-        });
-
-        if (!policyResult.allowed) {
-          logger.warn(
-            {
-              event: "audit.auth.team_member.role_update.blocked",
-              actorUserId: ctx.session.user.id,
-              tenantId,
-              targetUserId: input.memberUserId,
-              currentRole: targetMembership.role,
-              requestedRole: input.role,
-              reason: policyResult.reason,
-            },
-            "Blocked role update request"
-          );
-
-          throw new TRPCError({
-            code: "FORBIDDEN",
-            message: policyResult.reason ?? "Role transition is not allowed.",
-          });
-        }
-
-        if (targetMembership.role === input.role) {
-          return {
-            targetUserId: targetMembership.userId,
-            previousRole: targetMembership.role,
-            nextRole: input.role,
-            roleChanged: false,
-          };
-        }
-
-        await tx
-          .update(tenantMemberships)
-          .set({ role: input.role })
-          .where(
-            and(
-              eq(tenantMemberships.tenantId, tenantId),
-              eq(tenantMemberships.userId, targetMembership.userId)
-            )
-          );
-
-        const adminCountAfterUpdate = await countTenantAdmins({ tenantId, db: tx });
-        assertTenantHasAdminOrThrow(adminCountAfterUpdate);
-
-        return {
-          targetUserId: targetMembership.userId,
-          previousRole: targetMembership.role,
-          nextRole: input.role,
-          roleChanged: true,
-        };
-      });
-
-      if (mutationResult.forbidden) {
-        await createAuditEvent({ db: ctx.db, ...mutationResult.auditData });
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Only Admins can change member roles.",
-        });
-      }
-
-      if (mutationResult.roleChanged) {
-        logger.info(
-          {
-            event: "audit.auth.team_member.role_update.success",
-            actorUserId: ctx.session.user.id,
-            tenantId,
-            targetUserId: mutationResult.targetUserId,
-            previousRole: mutationResult.previousRole,
-            nextRole: mutationResult.nextRole,
-          },
-          "Member role updated"
-        );
-
-        // Persist audit event
-        await createAuditEvent({
-          db: ctx.db,
-          tenantId,
-          actorUserId: ctx.session.user.id,
-          actionType: "role_changed",
-          targetType: "user",
-          targetId: mutationResult.targetUserId,
-          status: "success",
-          context: JSON.stringify({
-            previousRole: mutationResult.previousRole,
-            nextRole: mutationResult.nextRole,
-          }),
-        });
-      }
-
-      return {
-        success: true,
-        message: "Member role updated successfully.",
-        memberUserId: mutationResult.targetUserId,
-        role: input.role,
-      };
+      return membershipService.updateMemberRole(ctx.db, ctx.tenantId!, ctx.session.user.id, ctx.membership.role, input);
     }),
 
   /**
@@ -1054,257 +799,17 @@ export const authRouter = createTRPCRouter({
     .input(removeTenantMemberInputSchema)
     .output(removeTenantMemberOutputSchema)
     .mutation(async ({ ctx, input }) => {
-      const tenantId = ctx.tenantId!;
+      const result = await membershipService.removeMember(ctx.db, ctx.tenantId!, ctx.session.user.id, ctx.membership.role, input);
 
-      const targetMembership = await ctx.db.query.tenantMemberships.findFirst({
-        columns: {
-          tenantId: true,
-          userId: true,
-          role: true,
-        },
-        where: and(
-          eq(tenantMemberships.tenantId, tenantId),
-          eq(tenantMemberships.userId, input.memberUserId)
-        ),
-      });
-
-      if (!targetMembership) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Member not found in this tenant.",
-        });
+      if (result.requiresSecondConfirmation) {
+        return result;
       }
 
-      const adminCount = await countTenantAdmins({ tenantId, db: ctx.db });
-      const policyResult = validateMemberRemovalPolicy({
-        actorUserId: ctx.session.user.id,
-        targetUserId: targetMembership.userId,
-        targetRole: targetMembership.role,
-        adminCount,
-      });
-
-      if (!policyResult.allowed) {
-        logger.warn(
-          {
-            event: "audit.auth.team_member.remove.blocked",
-            actorUserId: ctx.session.user.id,
-            tenantId,
-            targetUserId: targetMembership.userId,
-            targetRole: targetMembership.role,
-            reason: policyResult.reason,
-          },
-          "Blocked member removal request"
-        );
-
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: policyResult.reason ?? "Member removal is not allowed.",
-        });
-      }
-
-      const isSelfRemoval = targetMembership.userId === ctx.session.user.id;
-
-      if (isSelfRemoval) {
-        const hasValidConfirmation =
-          input.confirmStep === 2 &&
-          typeof input.confirmToken === "string" &&
-          verifySelfRemovalConfirmToken({
-            token: input.confirmToken,
-            tenantId,
-            userId: targetMembership.userId,
-          });
-
-        if (!hasValidConfirmation) {
-          const confirmToken = createSelfRemovalConfirmToken({
-            tenantId,
-            userId: targetMembership.userId,
-          });
-
-          logger.info(
-            {
-              event: "audit.auth.team_member.self_removal.confirmation_requested",
-              actorUserId: ctx.session.user.id,
-              tenantId,
-            },
-            "Self-removal confirmation requested"
-          );
-
-          return {
-            success: false,
-            message: "Confirm self-removal one more time to continue.",
-            requiresSecondConfirmation: true,
-            confirmToken,
-            memberUserId: targetMembership.userId,
-          };
-        }
-      }
-
-      type MemberRemovalTransactionResult =
-        | { forbidden: true; auditData: Omit<Parameters<typeof createAuditEvent>[0], "db"> }
-        | { targetUserId: string; targetRole: TenantRole; sessionsInvalidated: boolean };
-
-      const removalResult = await ctx.db.transaction(async (tx) => {
-        await lockTenantMembershipsForUpdate({ tenantId, db: tx });
-
-        // Re-query actor membership inside the locked transaction
-        const actorMembershipInTx = await tx.query.tenantMemberships.findFirst({
-          columns: { role: true },
-          where: and(
-            eq(tenantMemberships.tenantId, tenantId),
-            eq(tenantMemberships.userId, ctx.session.user.id),
-          ),
-        });
-
-        if (!actorMembershipInTx || !canManageTenantMembers(actorMembershipInTx.role)) {
-          logger.warn(
-            {
-              event: "audit.auth.team_member.remove.forbidden",
-              actorUserId: ctx.session.user.id,
-              tenantId,
-              actorRole: actorMembershipInTx?.role,
-              targetUserId: input.memberUserId,
-            },
-            "Forbidden member removal attempt"
-          );
-
-          return {
-            forbidden: true as const,
-            auditData: {
-              tenantId,
-              actorUserId: ctx.session.user.id,
-              actionType: "forbidden_attempt" as const,
-              targetType: "user",
-              targetId: input.memberUserId,
-              status: "failure" as const,
-              context: JSON.stringify({
-                action: "member_remove",
-                actorRole: actorMembershipInTx?.role,
-              }),
-            },
-          };
-        }
-
-        const targetMembershipInTx = await tx.query.tenantMemberships.findFirst({
-          columns: {
-            tenantId: true,
-            userId: true,
-            role: true,
-          },
-          where: and(
-            eq(tenantMemberships.tenantId, tenantId),
-            eq(tenantMemberships.userId, input.memberUserId)
-          ),
-        });
-
-        if (!targetMembershipInTx) {
-          throw new TRPCError({
-            code: "NOT_FOUND",
-            message: "Member not found in this tenant.",
-          });
-        }
-
-        const adminCountInTx = await countTenantAdmins({ tenantId, db: tx });
-        const policyResultInTx = validateMemberRemovalPolicy({
-          actorUserId: ctx.session.user.id,
-          targetUserId: targetMembershipInTx.userId,
-          targetRole: targetMembershipInTx.role,
-          adminCount: adminCountInTx,
-        });
-
-        if (!policyResultInTx.allowed) {
-          throw new TRPCError({
-            code: "FORBIDDEN",
-            message: policyResultInTx.reason ?? "Member removal is not allowed.",
-          });
-        }
-
-        await tx
-          .delete(tenantMemberships)
-          .where(
-            and(
-              eq(tenantMemberships.tenantId, tenantId),
-              eq(tenantMemberships.userId, targetMembershipInTx.userId)
-            )
-          );
-
-        const fallbackMembership = await tx.query.tenantMemberships.findFirst({
-          columns: {
-            tenantId: true,
-          },
-          where: eq(tenantMemberships.userId, targetMembershipInTx.userId),
-        });
-
-        await tx
-          .update(user)
-          .set({ defaultTenantId: fallbackMembership?.tenantId ?? null })
-          .where(and(eq(user.id, targetMembershipInTx.userId), eq(user.defaultTenantId, tenantId)));
-
-        const shouldInvalidateSessions = isSelfRemoval || !fallbackMembership;
-
-        if (shouldInvalidateSessions) {
-          await globallyInvalidateAllUserSessions(tx, targetMembershipInTx.userId);
-        }
-
-        const adminCountAfterRemoval = await countTenantAdmins({ tenantId, db: tx });
-        assertTenantHasAdminOrThrow(adminCountAfterRemoval);
-
-        return {
-          targetUserId: targetMembershipInTx.userId,
-          targetRole: targetMembershipInTx.role,
-          sessionsInvalidated: shouldInvalidateSessions,
-        };
-      });
-
-      if (removalResult.forbidden) {
-        await createAuditEvent({ db: ctx.db, ...removalResult.auditData });
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Only Admins can remove members.",
-        });
-      }
-
-      if (isSelfRemoval) {
+      if (input.memberUserId === ctx.session.user.id) {
         ctx.responseHeaders.append("Set-Cookie", buildClearSessionCookie());
       }
 
-      logger.info(
-        {
-          event: isSelfRemoval
-            ? "audit.auth.team_member.self_removal.confirmed"
-            : "audit.auth.team_member.remove.success",
-          actorUserId: ctx.session.user.id,
-          tenantId,
-          targetUserId: removalResult.targetUserId,
-          targetRole: removalResult.targetRole,
-          sessionsInvalidated: removalResult.sessionsInvalidated,
-        },
-        "Member removed from tenant"
-      );
-
-      // Persist audit event
-      await createAuditEvent({
-        db: ctx.db,
-        tenantId,
-        actorUserId: ctx.session.user.id,
-        actionType: "member_removed",
-        targetType: "user",
-        targetId: removalResult.targetUserId,
-        status: "success",
-        context: JSON.stringify({
-          targetRole: removalResult.targetRole,
-          isSelfRemoval,
-          sessionsInvalidated: removalResult.sessionsInvalidated,
-        }),
-      });
-
-      return {
-        success: true,
-        message: isSelfRemoval
-          ? "You have been removed from this tenant."
-          : "Member removed successfully.",
-        requiresSecondConfirmation: false,
-        memberUserId: removalResult.targetUserId,
-      };
+      return result;
     }),
 
   /**
@@ -1329,354 +834,32 @@ export const authRouter = createTRPCRouter({
    * List all pending invitations in current tenant.
    * Admin-only.
    */
-  listInvitations: membershipProcedure
+  listInvitations: adminProcedure
     .output(listInvitationsOutputSchema)
     .query(async ({ ctx }) => {
-      const tenantId = ctx.tenantId!;
-
-      if (!canManageTenantMembers(ctx.membership.role)) {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Only Admins can view invitations.",
-        });
-      }
-
-      const invitations = await ctx.db.query.tenantInvitations.findMany({
-        where: eq(tenantInvitations.tenantId, tenantId),
-        orderBy: (invitations, { desc }) => [desc(invitations.createdAt)],
-      });
-
-      return {
-        invitations: invitations.map((inv) => ({
-          id: inv.id,
-          tenantId: inv.tenantId,
-          email: inv.email,
-          role: inv.role,
-          invitedByUserId: inv.invitedByUserId,
-          expiresAt: inv.expiresAt.toISOString(),
-          revokedAt: inv.revokedAt?.toISOString(),
-          usedAt: inv.usedAt?.toISOString(),
-          createdAt: inv.createdAt.toISOString(),
-        })),
-      };
+      return invitationService.listInvitations(ctx.db, ctx.tenantId!);
     }),
 
   /**
    * Create a new invitation to join the tenant.
    * Admin-only.
    */
-  createInvitation: membershipProcedure
+  createInvitation: adminProcedure
     .input(createInvitationInputSchema)
     .output(createInvitationResponseSchema)
     .mutation(async ({ ctx, input }) => {
-      const tenantId = ctx.tenantId!;
-
-      if (!canManageTenantMembers(ctx.membership.role)) {
-        logger.warn(
-          {
-            event: "audit.auth.invitation.create.forbidden",
-            actorUserId: ctx.session.user.id,
-            tenantId,
-            actorRole: ctx.membership.role,
-            targetEmail: input.email,
-          },
-          "Forbidden invitation creation attempt"
-        );
-
-        // Persist audit event for forbidden attempt
-        await createAuditEvent({
-          db: ctx.db,
-          tenantId,
-          actorUserId: ctx.session.user.id,
-          actionType: "forbidden_attempt",
-          status: "failure",
-          context: JSON.stringify({
-            action: "invitation_create",
-            actorRole: ctx.membership.role,
-            targetEmail: input.email,
-          }),
-        });
-
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Only Admins can create invitations.",
-        });
-      }
-
-      const normalizedEmail = input.email.trim().toLowerCase();
-
-      // Generate secure random token
-      const token = crypto.randomUUID();
-      const tokenHash = await hashToken(token);
-
-      // Create invitation with 7-day expiration
-      const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + 7);
-
-      let invitation: typeof tenantInvitations.$inferSelect | undefined;
-      try {
-        [invitation] = await ctx.db.transaction(async (tx) => {
-          await lockTenantSubscription({
-            db: tx,
-            tenantId,
-          });
-
-          const userLimitCheck = await checkUserLimit({
-            db: tx,
-            tenantId,
-          });
-
-          if (!userLimitCheck.allowed) {
-            throw new TRPCError({
-              code: "FORBIDDEN",
-              message: `User limit reached. Your ${userLimitCheck.plan} plan allows a maximum of ${userLimitCheck.limit} users. Upgrade in Billing settings: ${BILLING_UPGRADE_ROUTE}`,
-            });
-          }
-
-          const existingMembership = await tx
-            .select({ userId: tenantMemberships.userId })
-            .from(tenantMemberships)
-            .innerJoin(user, eq(tenantMemberships.userId, user.id))
-            .where(
-              and(
-                eq(tenantMemberships.tenantId, tenantId),
-                sql`lower(${user.email}) = ${normalizedEmail}`
-              )
-            )
-            .limit(1);
-
-          if (existingMembership.length > 0) {
-            throw new TRPCError({
-              code: "CONFLICT",
-              message: "This user is already a member of the tenant.",
-            });
-          }
-
-          await tx
-            .update(tenantInvitations)
-            .set({ revokedAt: new Date() })
-            .where(
-              and(
-                eq(tenantInvitations.tenantId, tenantId),
-                sql`lower(${tenantInvitations.email}) = ${normalizedEmail}`,
-                isNull(tenantInvitations.revokedAt),
-                isNull(tenantInvitations.usedAt),
-                lt(tenantInvitations.expiresAt, new Date())
-              )
-            );
-
-          const existingInvitation = await tx.query.tenantInvitations.findFirst({
-            where: and(
-              eq(tenantInvitations.tenantId, tenantId),
-              sql`lower(${tenantInvitations.email}) = ${normalizedEmail}`,
-              isNull(tenantInvitations.revokedAt),
-              isNull(tenantInvitations.usedAt)
-            ),
-          });
-
-          if (existingInvitation) {
-            throw new TRPCError({
-              code: "CONFLICT",
-              message: "An active invitation already exists for this email.",
-            });
-          }
-
-          const inserted = await tx
-            .insert(tenantInvitations)
-            .values({
-              tenantId,
-              email: normalizedEmail,
-              role: input.role,
-              tokenHash,
-              expiresAt,
-              invitedByUserId: ctx.session.user.id,
-            })
-            .returning();
-
-          return inserted;
-        });
-      } catch (error) {
-        if (isUniqueConstraintViolation(error)) {
-          throw new TRPCError({
-            code: "CONFLICT",
-            message: "An active invitation already exists for this email.",
-          });
-        }
-
-        throw error;
-      }
-
-      if (!invitation) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "Failed to create invitation.",
-        });
-      }
-
-      // Get tenant and inviter details for email
-      const tenant = await ctx.db.query.tenants.findFirst({
-        where: eq(tenants.id, tenantId),
-        columns: { name: true },
-      });
-
-      const invitedByUser = await ctx.db.query.user.findFirst({
-        where: eq(user.id, ctx.session.user.id),
-        columns: { name: true },
-      });
-
-      // Send invitation email
-      queueInvitationEmail({
-        invitationId: invitation.id,
-        email: normalizedEmail,
-        token,
-        tenantName: tenant?.name ?? "Your Organization",
-        invitedByName: invitedByUser?.name ?? "An Admin",
-        role: input.role,
-      });
-
-      logger.info(
-        {
-          event: "audit.auth.invitation.create.success",
-          actorUserId: ctx.session.user.id,
-          tenantId,
-          invitationId: invitation.id,
-          targetEmail: normalizedEmail,
-          targetRole: input.role,
-        },
-        "Invitation created and email queued"
-      );
-
-      // Persist audit event
-      await createAuditEvent({
-        db: ctx.db,
-        tenantId,
-        actorUserId: ctx.session.user.id,
-        actionType: "invite_created",
-        targetType: "invitation",
-        targetId: invitation.id,
-        status: "success",
-        context: JSON.stringify({ targetEmail: normalizedEmail, targetRole: input.role }),
-      });
-
-      return {
-        success: true,
-        message: "Invitation created successfully.",
-        invitation: {
-          id: invitation.id,
-          tenantId: invitation.tenantId,
-          email: invitation.email,
-          role: invitation.role,
-          invitedByUserId: invitation.invitedByUserId,
-          expiresAt: invitation.expiresAt.toISOString(),
-          revokedAt: invitation.revokedAt?.toISOString(),
-          usedAt: invitation.usedAt?.toISOString(),
-          createdAt: invitation.createdAt.toISOString(),
-        },
-      };
+      return invitationService.createInvitation(ctx.db, ctx.tenantId!, ctx.session.user.id, input);
     }),
 
   /**
    * Revoke a pending invitation.
    * Admin-only.
    */
-  revokeInvitation: membershipProcedure
+  revokeInvitation: adminProcedure
     .input(revokeInvitationInputSchema)
     .output(revokeInvitationResponseSchema)
     .mutation(async ({ ctx, input }) => {
-      const tenantId = ctx.tenantId!;
-
-      if (!canManageTenantMembers(ctx.membership.role)) {
-        logger.warn(
-          {
-            event: "audit.auth.invitation.revoke.forbidden",
-            actorUserId: ctx.session.user.id,
-            tenantId,
-            actorRole: ctx.membership.role,
-            invitationId: input.invitationId,
-          },
-          "Forbidden invitation revocation attempt"
-        );
-
-        // Persist audit event for forbidden attempt
-        await createAuditEvent({
-          db: ctx.db,
-          tenantId,
-          actorUserId: ctx.session.user.id,
-          actionType: "forbidden_attempt",
-          status: "failure",
-          context: JSON.stringify({
-            action: "invitation_revoke",
-            actorRole: ctx.membership.role,
-            invitationId: input.invitationId,
-          }),
-        });
-
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Only Admins can revoke invitations.",
-        });
-      }
-
-      const invitation = await ctx.db.query.tenantInvitations.findFirst({
-        where: and(
-          eq(tenantInvitations.id, input.invitationId),
-          eq(tenantInvitations.tenantId, tenantId)
-        ),
-      });
-
-      if (!invitation) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: "Invitation not found.",
-        });
-      }
-
-      if (invitation.revokedAt) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "Invitation is already revoked.",
-        });
-      }
-
-      if (invitation.usedAt) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "Invitation has already been used.",
-        });
-      }
-
-      await ctx.db
-        .update(tenantInvitations)
-        .set({ revokedAt: new Date() })
-        .where(eq(tenantInvitations.id, input.invitationId));
-
-      logger.info(
-        {
-          event: "audit.auth.invitation.revoke.success",
-          actorUserId: ctx.session.user.id,
-          tenantId,
-          invitationId: input.invitationId,
-          targetEmail: invitation.email,
-        },
-        "Invitation revoked successfully"
-      );
-
-      // Persist audit event
-      await createAuditEvent({
-        db: ctx.db,
-        tenantId,
-        actorUserId: ctx.session.user.id,
-        actionType: "invite_revoked",
-        targetType: "invitation",
-        targetId: input.invitationId,
-        status: "success",
-        context: JSON.stringify({ targetEmail: invitation.email }),
-      });
-
-      return {
-        success: true,
-        message: "Invitation revoked successfully.",
-      };
+      return invitationService.revokeInvitation(ctx.db, ctx.tenantId!, ctx.session.user.id, input);
     }),
 
   /**
@@ -1688,97 +871,8 @@ export const authRouter = createTRPCRouter({
     .output(previewInvitationResponseSchema)
     .query(async ({ ctx, input }) => {
       const tokenHash = await hashToken(input.token);
-      const clientIp = getClientIp(ctx.headers);
-
-      return ctx.db.transaction(async (tx) => {
-        await setInvitationTokenContext(tokenHash, tx);
-
-        const invitation = await tx.query.tenantInvitations.findFirst({
-          where: eq(tenantInvitations.tokenHash, tokenHash),
-        });
-
-        if (!invitation) {
-          logger.warn(
-            {
-              event: "audit.auth.invitation.preview.rejected",
-              reason: "invalid_or_missing",
-              clientIp,
-            },
-            "Invitation preview rejected"
-          );
-          return {
-            valid: false,
-            state: "expired" as const,
-            message:
-              "This invitation link is invalid or has expired. Please request a new invitation from an Admin.",
-          };
-        }
-
-        if (invitation.usedAt) {
-          logger.info(
-            {
-              event: "audit.auth.invitation.preview.rejected",
-              reason: "used",
-              invitationId: invitation.id,
-              clientIp,
-            },
-            "Invitation preview rejected"
-          );
-          return {
-            valid: false,
-            state: "used" as const,
-            message:
-              "This invitation has already been used. Please request a new invitation from an Admin.",
-          };
-        }
-
-        if (invitation.revokedAt) {
-          logger.info(
-            {
-              event: "audit.auth.invitation.preview.rejected",
-              reason: "revoked",
-              invitationId: invitation.id,
-              clientIp,
-            },
-            "Invitation preview rejected"
-          );
-          return {
-            valid: false,
-            state: "revoked" as const,
-            message:
-              "This invitation has been revoked. Please request a new invitation from an Admin.",
-          };
-        }
-
-        if (invitation.expiresAt < new Date()) {
-          logger.info(
-            {
-              event: "audit.auth.invitation.preview.rejected",
-              reason: "expired",
-              invitationId: invitation.id,
-              clientIp,
-            },
-            "Invitation preview rejected"
-          );
-          return {
-            valid: false,
-            state: "expired" as const,
-            message:
-              "This invitation has expired. Please request a new invitation from an Admin.",
-          };
-        }
-
-        return {
-          valid: true,
-          state: "pending" as const,
-          email: invitation.email,
-          role: invitation.role,
-          expiresAt: invitation.expiresAt.toISOString(),
-          message: "Invitation is valid. Please set your password to join.",
-        };
-      });
+      return invitationService.previewInvitation(ctx.db, input.token, tokenHash, ctx.headers);
     }),
-
   /**
    * Accept an invitation and create user account.
    * Public procedure - no authentication required.
@@ -1788,314 +882,22 @@ export const authRouter = createTRPCRouter({
     .output(acceptInvitationResponseSchema)
     .mutation(async ({ ctx, input }) => {
       const tokenHash = await hashToken(input.token);
-      const clientIp = getClientIp(ctx.headers);
-      let createdUserId: string | null = null;
-      let result:
-        | {
-            userId: string;
-            tenantId: string;
-            isNewUser: boolean;
-          }
-        | undefined;
-
-      try {
-        result = await ctx.db.transaction(async (tx) => {
-          await setInvitationTokenContext(tokenHash, tx);
-
-          const invitation = await tx.query.tenantInvitations.findFirst({
-            where: eq(tenantInvitations.tokenHash, tokenHash),
-          });
-
-          if (!invitation) {
-            logger.warn(
-              {
-                event: "audit.auth.invitation.accept.rejected",
-                reason: "invalid_or_missing",
-                clientIp,
-              },
-              "Invitation accept rejected"
-            );
-            throw new TRPCError({
-              code: "NOT_FOUND",
-              message:
-                "This invitation link is invalid or has expired. Please request a new invitation from an Admin.",
-            });
-          }
-
-          if (invitation.usedAt) {
-            logger.info(
-              {
-                event: "audit.auth.invitation.accept.rejected",
-                reason: "used",
-                invitationId: invitation.id,
-                clientIp,
-              },
-              "Invitation accept rejected"
-            );
-            throw new TRPCError({
-              code: "CONFLICT",
-              message:
-                "This invitation has already been used. Please request a new invitation from an Admin.",
-            });
-          }
-
-          if (invitation.revokedAt) {
-            logger.info(
-              {
-                event: "audit.auth.invitation.accept.rejected",
-                reason: "revoked",
-                invitationId: invitation.id,
-                clientIp,
-              },
-              "Invitation accept rejected"
-            );
-            throw new TRPCError({
-              code: "CONFLICT",
-              message:
-                "This invitation has been revoked. Please request a new invitation from an Admin.",
-            });
-          }
-
-          if (invitation.expiresAt < new Date()) {
-            logger.info(
-              {
-                event: "audit.auth.invitation.accept.rejected",
-                reason: "expired",
-                invitationId: invitation.id,
-                clientIp,
-              },
-              "Invitation accept rejected"
-            );
-            throw new TRPCError({
-              code: "CONFLICT",
-              message:
-                "This invitation has expired. Please request a new invitation from an Admin.",
-            });
-          }
-
-          // Atomically consume token in this transaction before continuing. If
-          // another request consumed it first, no row is returned.
-          const consumedAt = new Date();
-          const [consumedInvitation] = await tx
-            .update(tenantInvitations)
-            .set({ usedAt: consumedAt })
-            .where(
-              and(
-                eq(tenantInvitations.id, invitation.id),
-                isNull(tenantInvitations.usedAt),
-                isNull(tenantInvitations.revokedAt),
-                gt(tenantInvitations.expiresAt, consumedAt)
-              )
-            )
-            .returning({
-              id: tenantInvitations.id,
-              tenantId: tenantInvitations.tenantId,
-              email: tenantInvitations.email,
-              role: tenantInvitations.role,
-            });
-
-          if (!consumedInvitation) {
-            logger.warn(
-              {
-                event: "audit.auth.invitation.accept.rejected",
-                reason: "already_consumed_or_invalid_state",
-                invitationId: invitation.id,
-                clientIp,
-              },
-              "Invitation accept rejected due to token race"
-            );
-            throw new TRPCError({
-              code: "CONFLICT",
-              message:
-                "This invitation has already been used. Please request a new invitation from an Admin.",
-            });
-          }
-
-          const existingUser = await tx.query.user.findFirst({
-            where: eq(user.email, consumedInvitation.email),
-          });
-
-          let userId: string;
-
-          if (existingUser) {
-            const existingMembership = await tx.query.tenantMemberships.findFirst({
-              where: and(
-                eq(tenantMemberships.tenantId, consumedInvitation.tenantId),
-                eq(tenantMemberships.userId, existingUser.id)
-              ),
-            });
-
-            if (existingMembership) {
-              logger.info(
-                {
-                  event: "audit.auth.invitation.accept.rejected",
-                  reason: "already_member",
-                  invitationId: consumedInvitation.id,
-                  tenantId: consumedInvitation.tenantId,
-                  userId: existingUser.id,
-                  clientIp,
-                },
-                "Invitation accept rejected"
-              );
-              throw new TRPCError({
-                code: "CONFLICT",
-                message: "You are already a member of this tenant.",
-              });
-            }
-
-            userId = existingUser.id;
-          } else {
-            const userName =
-              consumedInvitation.email.split("@")[0] ?? consumedInvitation.email;
-            const signUpResult = await auth.api.signUpEmail({
-              body: {
-                email: consumedInvitation.email,
-                password: input.password,
-                name: userName,
-                callbackURL: "/dashboard",
-              },
-              headers: ctx.headers,
-            });
-
-            if (!signUpResult?.user?.id) {
-              throw new TRPCError({
-                code: "INTERNAL_SERVER_ERROR",
-                message: "Failed to create user account.",
-              });
-            }
-
-            userId = signUpResult.user.id;
-            createdUserId = userId;
-          }
-
-          await setTenantContext(consumedInvitation.tenantId, tx);
-
-          await tx.insert(tenantMemberships).values({
-            tenantId: consumedInvitation.tenantId,
-            userId,
-            role: consumedInvitation.role,
-          });
-
-          await tx
-            .update(user)
-            .set({ defaultTenantId: consumedInvitation.tenantId })
-            .where(eq(user.id, userId));
-
-          return {
-            userId,
-            tenantId: consumedInvitation.tenantId,
-            isNewUser: !existingUser,
-          };
-        });
-      } catch (error) {
-        if (createdUserId) {
-          try {
-            await ctx.db.delete(user).where(eq(user.id, createdUserId));
-          } catch (cleanupError) {
-            logger.error(
-              {
-                event: "audit.auth.invitation.accept.cleanup.failed",
-                userId: createdUserId,
-                reason:
-                  cleanupError instanceof Error
-                    ? cleanupError.message
-                    : "unknown",
-              },
-              "Failed to clean up user after invitation accept failure"
-            );
-          }
-        }
-
-        throw error;
-      }
-
-      if (!result) {
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "Failed to accept invitation.",
-        });
-      }
-
-      logger.info(
-        {
-          event: "audit.auth.invitation.accept.success",
-          userId: result.userId,
-          tenantId: result.tenantId,
-          isNewUser: result.isNewUser,
-          clientIp,
-        },
-        "Invitation accepted successfully"
-      );
-
-      return {
-        success: true,
-        message: "Invitation accepted successfully. You can now sign in.",
-        redirectTo: "/login",
-      };
+      return invitationService.acceptInvitation(ctx.db, ctx.headers, {
+        token: input.token,
+        password: input.password,
+        tokenHash,
+      });
     }),
 
   /**
    * List audit events for the current tenant.
    * Admin-only.
    */
-  listAuditEvents: membershipProcedure
+  listAuditEvents: adminProcedure
     .input(listAuditEventsInputSchema)
     .output(listAuditEventsOutputSchema)
     .query(async ({ ctx, input }) => {
-      const tenantId = ctx.tenantId!;
-
-      if (ctx.membership.role !== "Admin") {
-        throw new TRPCError({
-          code: "FORBIDDEN",
-          message: "Only Admins can view audit logs.",
-        });
-      }
-
-      const limit = input.limit ?? 20;
-      const cursor = input.cursor;
-      const cursorCreatedAt = cursor ? new Date(cursor.createdAt) : null;
-
-      const events = await ctx.db.query.auditEvents.findMany({
-        where: cursor && cursorCreatedAt
-          ? (auditEvents, { and, eq, lt }) =>
-              and(
-                eq(auditEvents.tenantId, tenantId),
-                or(
-                  lt(auditEvents.createdAt, cursorCreatedAt),
-                  and(eq(auditEvents.createdAt, cursorCreatedAt), lt(auditEvents.id, cursor.id))
-                )
-              )
-          : (auditEvents, { eq }) => eq(auditEvents.tenantId, tenantId),
-        orderBy: (auditEvents, { desc }) => [desc(auditEvents.createdAt), desc(auditEvents.id)],
-        limit: limit + 1,
-      });
-
-      let nextCursor: { createdAt: string; id: string } | null = null;
-      if (events.length > limit) {
-        const nextEvent = events[limit - 1];
-        if (nextEvent) {
-          nextCursor = {
-            createdAt: nextEvent.createdAt.toISOString(),
-            id: nextEvent.id,
-          };
-        }
-        events.pop();
-      }
-
-      return {
-        events: events.map((event) => ({
-          id: event.id,
-          tenantId: event.tenantId,
-          actorUserId: event.actorUserId,
-          actionType: event.actionType,
-          targetType: event.targetType,
-          targetId: event.targetId,
-          status: event.status,
-          context: event.context,
-          createdAt: event.createdAt.toISOString(),
-        })),
-        nextCursor,
-      };
+      return membershipService.listAuditEvents(ctx.db, ctx.tenantId!, input);
     }),
 
   getCurrentTenantMembership: protectedProcedure

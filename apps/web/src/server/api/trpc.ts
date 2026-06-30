@@ -200,3 +200,13 @@ export const protectedProcedure = t.procedure
   });
 
 export const membershipProcedure = protectedProcedure.use(requireMembership());
+
+export const adminProcedure = membershipProcedure.use(async ({ ctx, next }) => {
+  if (ctx.membership.role !== "Admin") {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "Only Admins can perform this action.",
+    });
+  }
+  return next();
+});

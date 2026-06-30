@@ -16,7 +16,7 @@ vi.mock("~/server/better-auth", () => ({
 }));
 
 vi.mock("~/server/rate-limit", () => ({
-  rateLimit: vi.fn(() => ({ allowed: true, remaining: 29, resetAt: Date.now() + 60000 })),
+  rateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 29, resetAt: Date.now() + 60000 }),
   getClientIp: vi.fn(() => "127.0.0.1"),
 }));
 
