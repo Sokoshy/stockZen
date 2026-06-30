@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
 
     const clientIp = getClientIp(request.headers);
     const rateLimitKey = `sync:${session.user.id}:${clientIp}`;
-    const rateLimitResult = await rateLimit(rateLimitKey, SYNC_RATE_LIMIT);
+    const rateLimitResult = await rateLimit(db, rateLimitKey, SYNC_RATE_LIMIT);
 
     if (!rateLimitResult.allowed) {
       const errorResponse = syncErrorSchema.parse({

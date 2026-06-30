@@ -1,7 +1,10 @@
 import { sql } from "drizzle-orm";
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 
-import { db } from "~/server/db";
 import { rateLimits } from "~/server/db/schema";
+import type * as schema from "~/server/db/schema";
+
+type DbClient = PostgresJsDatabase<typeof schema>;
 
 type RateLimitOptions = {
   limit: number;
@@ -29,6 +32,7 @@ export function getClientIp(headers: Headers): string {
 
 // ponytail: pas de cron vacuum ; reset paresseux. Ajouter si la table grossit.
 export async function rateLimit(
+  db: DbClient,
   identifier: string,
   options: RateLimitOptions
 ): Promise<RateLimitResult> {

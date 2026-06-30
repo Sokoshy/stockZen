@@ -129,7 +129,9 @@ export const tenantMemberships = pgTable("tenant_memberships", {
   createdAt: timestamp("created_at", { withTimezone: true })
     .$defaultFn(() => new Date())
     .notNull(),
-});
+}, (table) => [
+  uniqueIndex("idx_tenant_memberships_tenant_user").on(table.tenantId, table.userId),
+]);
 
 export const tenantInvitations = pgTable("tenant_invitations", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -165,6 +167,7 @@ export const auditActionTypeEnum = pgEnum("audit_action_type", [
   "password_reset_completed",
   "invite_created",
   "invite_revoked",
+  "invite_accepted",
   "role_changed",
   "member_removed",
   "login_failed",

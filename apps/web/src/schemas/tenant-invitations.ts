@@ -66,9 +66,7 @@ export type AcceptInvitationInput = z.infer<typeof acceptInvitationInputSchema>;
  */
 export const invitationStateSchema = z.enum([
   "pending",
-  "expired",
-  "revoked",
-  "used",
+  "invalid_or_expired",
 ]);
 
 export type InvitationState = z.infer<typeof invitationStateSchema>;

@@ -40,11 +40,9 @@ export default async function InvitePage({ searchParams }: InvitePageProps) {
       <div className="mx-auto max-w-md space-y-6 text-center">
         <div className="rounded-md bg-red-50 p-4" role="alert">
           <h1 className="text-lg font-semibold text-red-800">
-            {preview.state === "used"
-              ? "Invitation Already Used"
-              : preview.state === "revoked"
-                ? "Invitation Revoked"
-                : "Invitation Expired"}
+            {preview.state === "invalid_or_expired"
+              ? "Invitation Invalid or Expired"
+              : "Invitation Expired"}
           </h1>
           <p className="mt-2 text-sm text-red-700">{preview.message}</p>
         </div>

@@ -19,15 +19,15 @@ describe("rate-limit (postgres-backed)", () => {
     const key = `test-rl-${Date.now()}`;
     const opts = { limit: 2, windowMs: 60_000 };
 
-    const r1 = await rateLimit(key, opts);
+    const r1 = await rateLimit(testDb, key, opts);
     expect(r1.allowed).toBe(true);
     expect(r1.remaining).toBe(1);
 
-    const r2 = await rateLimit(key, opts);
+    const r2 = await rateLimit(testDb, key, opts);
     expect(r2.allowed).toBe(true);
     expect(r2.remaining).toBe(0);
 
-    const r3 = await rateLimit(key, opts);
+    const r3 = await rateLimit(testDb, key, opts);
     expect(r3.allowed).toBe(false);
     expect(r3.remaining).toBe(0);
 

@@ -6,6 +6,7 @@ export const auditActionTypeSchema = z.enum([
   "password_reset_completed",
   "invite_created",
   "invite_revoked",
+  "invite_accepted",
   "role_changed",
   "member_removed",
   "login_failed",
