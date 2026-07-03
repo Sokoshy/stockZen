@@ -1,13 +1,15 @@
 "use client";
 
-import Link from "next/link";
-import { useCallback, useState, useTransition } from "react";
-import { useDropzone } from "react-dropzone";
-import { useQueryClient } from "@tanstack/react-query";
-import Papa from "papaparse";
+import Link from "next/link"
+import { useCallback, useState, useTransition } from "react"
+import { useDropzone } from "react-dropzone"
+import { useQueryClient } from "@tanstack/react-query"
+import Papa from "papaparse"
 
-import { useImportProducts } from "~/features/products/queries/useImportProducts";
-import { buildImportErrorReportCsv } from "~/features/products/utils/csv-import";
+import { useImportProducts } from "~/features/products/queries/useImportProducts"
+import { buildImportErrorReportCsv } from "~/features/products/utils/csv-import"
+import { Icons } from "~/components/icons"
+import { toast } from "~/hooks/use-toast"
 
 interface CSVRow {
   name?: string;
@@ -74,13 +76,13 @@ export function CSVImportClient({ allowedRoles, membership }: CSVImportClientPro
       if (!selectedFile) return;
       
       if (selectedFile.type !== "text/csv" && !selectedFile.name.endsWith(".csv")) {
-        alert("Please upload a CSV file");
-        return;
+        toast({ title: "Invalid file", description: "Please upload a CSV file", variant: "destructive" } as unknown as Parameters<typeof toast>[0])
+        return
       }
 
       if (selectedFile.size > 5 * 1024 * 1024) {
-        alert("File size must be less than 5MB");
-        return;
+        toast({ title: "File too large", description: "File size must be less than 5MB", variant: "destructive" } as unknown as Parameters<typeof toast>[0])
+        return
       }
 
       setFile(selectedFile);
@@ -160,15 +162,15 @@ export function CSVImportClient({ allowedRoles, membership }: CSVImportClientPro
   const handleSubmit = () => {
     startTransition(() => {
       if (!file) {
-        alert("Please select a file");
-        return;
+        toast({ title: "No file selected", description: "Please select a file", variant: "destructive" } as unknown as Parameters<typeof toast>[0])
+        return
       }
 
-      const formData = new FormData();
-      formData.append("file", file);
-      importProducts(formData);
-    });
-  };
+      const formData = new FormData()
+      formData.append("file", file)
+      importProducts(formData)
+    })
+  }
 
   const handleDownloadErrorReport = () => {
     if (!importResult || importResult.errors.length === 0) return;
@@ -208,13 +210,9 @@ export function CSVImportClient({ allowedRoles, membership }: CSVImportClientPro
           <div className="rounded-lg border bg-gray-50 p-6">
             <div className="flex items-center gap-3">
               {importResult.success ? (
-                <svg className="h-6 w-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
+                <Icons.check className="h-6 w-6 text-green-600" />
               ) : (
-                <svg className="h-6 w-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <Icons.x className="h-6 w-6 text-red-600" />
               )}
               <div>
                 <h3 className="font-semibold">
@@ -240,9 +238,7 @@ export function CSVImportClient({ allowedRoles, membership }: CSVImportClientPro
                   onClick={handleDownloadErrorReport}
                   className="inline-flex items-center rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
                 >
-                  <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                  </svg>
+                  <Icons.download className="mr-2 h-4 w-4" />
                   Download Error Report ({importResult.errors.length} errors)
                 </button>
               </div>
@@ -266,9 +262,7 @@ export function CSVImportClient({ allowedRoles, membership }: CSVImportClientPro
             <input {...getInputProps()} />
             {file ? (
               <div className="text-center">
-                <svg className="mx-auto h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
+                <Icons.fileText className="mx-auto h-8 w-8 text-green-600" />
                 <p className="mt-2 text-sm font-medium text-gray-900">{file.name}</p>
                 <p className="text-xs text-gray-500">
                   {(file.size / 1024).toFixed(2)} KB
@@ -276,9 +270,7 @@ export function CSVImportClient({ allowedRoles, membership }: CSVImportClientPro
               </div>
             ) : (
               <div className="text-center">
-                <svg className="mx-auto mb-4 h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                </svg>
+                <Icons.upload className="mx-auto mb-4 h-12 w-12 text-gray-400" />
                 <p className="mb-2 text-sm text-gray-600">
                   Drag and drop your CSV file here, or click to select
                 </p>
@@ -328,13 +320,9 @@ export function CSVImportClient({ allowedRoles, membership }: CSVImportClientPro
                       <td className="whitespace-nowrap px-3 py-2 text-sm text-gray-500">{row.data.barcode || "-"}</td>
                       <td className="whitespace-nowrap px-3 py-2">
                         {row.isValid ? (
-                          <svg className="h-4 w-4 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                          </svg>
+                          <Icons.check className="h-4 w-4 text-green-600" />
                         ) : (
-                          <svg className="h-4 w-4 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                          </svg>
+                          <Icons.alertTriangle className="h-4 w-4 text-red-600" />
                         )}
                       </td>
                     </tr>

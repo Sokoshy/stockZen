@@ -1,8 +1,18 @@
-"use client";
+"use client"
 
-import React, { useState, useRef, useCallback } from "react";
-import { deleteProductOffline, restoreProduct } from "~/features/offline/sync-pipeline";
-import { api } from "~/trpc/react";
+import { useState, useRef, useCallback } from "react"
+import { deleteProductOffline, restoreProduct } from "~/features/offline/sync-pipeline"
+import { api } from "~/trpc/react"
+import {
+  Dialog,
+  DialogTrigger,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "~/components/ui/dialog"
+import { Button } from "~/components/ui/button"
 
 type DeleteProductDialogProps = {
   product: {
@@ -86,102 +96,65 @@ export function DeleteProductDialog({
   }, [onRestored, product.id]);
 
   const handleClose = () => {
-    setIsOpen(false);
-    setError(null);
+    setError(null)
     if (undoTimeoutRef.current) {
-      clearTimeout(undoTimeoutRef.current);
-      undoTimeoutRef.current = null;
+      clearTimeout(undoTimeoutRef.current)
+      undoTimeoutRef.current = null
     }
-  };
+    setIsOpen(false)
+  }
 
   return (
     <>
-      {trigger ? (
-        <div
-          role="button"
-          tabIndex={0}
-          onClick={() => {
-            setError(null);
-            setIsOpen(true);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              setError(null);
-              setIsOpen(true);
-            }
-          }}
-        >
-          {trigger}
-        </div>
-      ) : (
-        <button
-          type="button"
-          className="rounded-md border border-red-300 px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50"
-          onClick={() => {
-            setError(null);
-            setIsOpen(true);
-          }}
-        >
-          Delete
-        </button>
-      )}
-
-      {isOpen ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          role="dialog"
-          aria-modal="true"
-        >
-          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-lg">
-            <h3 className="text-lg font-semibold text-gray-900">Delete product</h3>
-            <p className="mt-2 text-sm text-gray-700">
+      <Dialog open={isOpen} onOpenChange={setIsOpen}>
+        {trigger ? (
+          <DialogTrigger render={trigger as React.ReactElement} />
+        ) : (
+          <DialogTrigger render={<Button variant="destructive" size="sm">Delete</Button>} />
+        )}
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete product</DialogTitle>
+            <DialogDescription>
               Are you sure you want to delete <strong>{product.name}</strong>? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+
+          {product.syncStatus !== "synced" && (
+            <p className="text-xs text-amber-700">
+              This product has unsynced local changes. Deletion will be queued offline.
             </p>
+          )}
 
-            {product.syncStatus !== "synced" ? (
-              <p className="mt-2 text-xs text-amber-700">
-                This product has unsynced local changes. Deletion will be queued offline.
-              </p>
-            ) : null}
+          {error && <p className="text-sm text-red-600">{error}</p>}
 
-            {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
+          <DialogFooter showCloseButton={false}>
+            <Button variant="outline" onClick={handleClose}>Cancel</Button>
+            <Button
+              variant="destructive"
+              disabled={isDeleting}
+              onClick={handleDelete}
+            >
+              {isDeleting ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
 
-            <div className="mt-6 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                className="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                onClick={handleClose}
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                className="rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:bg-red-300"
-                disabled={isDeleting}
-                onClick={handleDelete}
-              >
-                {isDeleting ? "Deleting..." : "Delete"}
-              </button>
+          {product.syncStatus === "synced" && (
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="offline-delete"
+                checked={isOffline}
+                onChange={(e) => setIsOffline(e.target.checked)}
+                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <label htmlFor="offline-delete" className="text-sm text-gray-600">
+                Save offline (no server sync)
+              </label>
             </div>
-
-            {product.syncStatus === "synced" && (
-              <div className="mt-4 flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="offline-delete"
-                  checked={isOffline}
-                  onChange={(e) => setIsOffline(e.target.checked)}
-                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                />
-                <label htmlFor="offline-delete" className="text-sm text-gray-600">
-                  Save offline (no server sync)
-                </label>
-              </div>
-            )}
-          </div>
-        </div>
-      ) : null}
+          )}
+        </DialogContent>
+      </Dialog>
 
       {showUndo && (
         <div className="fixed bottom-4 right-4 z-50 rounded-lg bg-gray-900 px-4 py-3 text-white shadow-lg">
@@ -198,5 +171,5 @@ export function DeleteProductDialog({
         </div>
       )}
     </>
-  );
+  )
 }
