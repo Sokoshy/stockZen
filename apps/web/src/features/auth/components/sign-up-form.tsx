@@ -1,5 +1,5 @@
-"use client"
-import { useRouter } from "next/navigation"
+"use client";
+import { useRouter } from "next/navigation";
 
 import { useState } from "react";
 import { useForm } from "react-hook-form";
@@ -30,7 +30,7 @@ export function SignUpForm({ onSuccess }: SignUpFormProps) {
       rememberMe: false,
     },
   });
-  const router = useRouter()
+  const router = useRouter();
 
   const signUpMutation = api.auth.signUp.useMutation({
     onSuccess: (data) => {

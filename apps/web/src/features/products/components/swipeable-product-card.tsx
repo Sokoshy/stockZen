@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Icons } from "~/components/icons"
+import { Icons } from "~/components/icons";
+import { Button } from "~/components/ui/button";
 import Link from "next/link";
 import { DeleteProductDialog } from "./delete-product-dialog";
 import type { TenantRole } from "~/schemas/team-membership";
@@ -283,17 +284,19 @@ export function SwipeableProductCard({
           <div className="flex flex-col gap-2 sm:hidden">
             <Link
               href={`/products/${product.id}/movements`}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-purple-300 bg-white text-purple-700 hover:bg-purple-50 focus:outline-none focus:ring-2 focus:ring-purple-500"
               aria-label={`View movement history for ${product.name}`}
             >
-              <Icons.clock className="h-5 w-5" />
+              <Button variant="outline" size="icon" className="border-purple-300 text-purple-700 hover:bg-purple-50">
+                <Icons.clock className="h-5 w-5" />
+              </Button>
             </Link>
             <Link
               href={`/products/${product.id}/edit`}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-md bg-blue-600 text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
               aria-label={`Edit ${product.name}`}
             >
-              <Icons.edit className="h-5 w-5" />
+              <Button variant="outline" size="icon" className="border-blue-300 bg-blue-600 text-white shadow-sm hover:bg-blue-700">
+                <Icons.edit className="h-5 w-5" />
+              </Button>
             </Link>
             <DeleteProductDialog
               product={{
@@ -305,13 +308,9 @@ export function SwipeableProductCard({
               onDeleted={onDeleted}
               onRestored={onRestored}
               trigger={
-                <button
-                  type="button"
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-red-300 bg-white text-red-700 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500"
-                  aria-label={`Delete ${product.name}`}
-                >
+                <Button variant="outline" size="icon" className="border-red-300 text-red-700 hover:bg-red-50" aria-label={`Delete ${product.name}`}>
                   <Icons.trash className="h-5 w-5" />
-                </button>
+                </Button>
               }
             />
           </div>

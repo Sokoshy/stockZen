@@ -1,15 +1,15 @@
 "use client";
 
-import Link from "next/link"
-import { useCallback, useState, useTransition } from "react"
-import { useDropzone } from "react-dropzone"
-import { useQueryClient } from "@tanstack/react-query"
-import Papa from "papaparse"
+import Link from "next/link";
+import { useCallback, useState, useTransition } from "react";
+import { useDropzone } from "react-dropzone";
+import { useQueryClient } from "@tanstack/react-query";
+import Papa from "papaparse";
 
-import { useImportProducts } from "~/features/products/queries/useImportProducts"
-import { buildImportErrorReportCsv } from "~/features/products/utils/csv-import"
-import { Icons } from "~/components/icons"
-import { toast } from "~/hooks/use-toast"
+import { useImportProducts } from "~/features/products/queries/useImportProducts";
+import { buildImportErrorReportCsv } from "~/features/products/utils/csv-import";
+import { Icons } from "~/components/icons";
+import { toast } from "~/hooks/use-toast";
 
 interface CSVRow {
   name?: string;
@@ -76,13 +76,13 @@ export function CSVImportClient({ allowedRoles, membership }: CSVImportClientPro
       if (!selectedFile) return;
       
       if (selectedFile.type !== "text/csv" && !selectedFile.name.endsWith(".csv")) {
-        toast({ title: "Invalid file", description: "Please upload a CSV file", variant: "destructive" } as unknown as Parameters<typeof toast>[0])
-        return
+        toast({ title: "Invalid file", description: "Please upload a CSV file", variant: "destructive" } as Parameters<typeof toast>[0]);
+        return;
       }
 
       if (selectedFile.size > 5 * 1024 * 1024) {
-        toast({ title: "File too large", description: "File size must be less than 5MB", variant: "destructive" } as unknown as Parameters<typeof toast>[0])
-        return
+        toast({ title: "File too large", description: "File size must be less than 5MB", variant: "destructive" } as Parameters<typeof toast>[0]);
+        return;
       }
 
       setFile(selectedFile);
@@ -162,14 +162,14 @@ export function CSVImportClient({ allowedRoles, membership }: CSVImportClientPro
   const handleSubmit = () => {
     startTransition(() => {
       if (!file) {
-        toast({ title: "No file selected", description: "Please select a file", variant: "destructive" } as unknown as Parameters<typeof toast>[0])
-        return
+        toast({ title: "No file selected", description: "Please select a file", variant: "destructive" } as Parameters<typeof toast>[0]);
+        return;
       }
 
-      const formData = new FormData()
-      formData.append("file", file)
-      importProducts(formData)
-    })
+      const formData = new FormData();
+      formData.append("file", file);
+      importProducts(formData);
+    });
   }
 
   const handleDownloadErrorReport = () => {

@@ -106,7 +106,7 @@ export function DeleteProductDialog({
 
   return (
     <>
-      <Dialog open={isOpen} onOpenChange={setIsOpen}>
+      <Dialog open={isOpen} onOpenChange={(open) => open ? setIsOpen(true) : handleClose()}>
         {trigger ? (
           <DialogTrigger render={trigger as React.ReactElement} />
         ) : (
