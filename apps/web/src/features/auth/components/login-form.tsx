@@ -1,4 +1,5 @@
 "use client";
+import { useRouter } from "next/navigation";
 
 import { useState } from "react";
 import { useForm } from "react-hook-form";
@@ -24,11 +25,10 @@ export function LoginForm() {
     },
   });
 
+  const router = useRouter();
   const loginMutation = api.auth.login.useMutation({
     onSuccess: () => {
-      window.setTimeout(() => {
-        window.location.assign("/dashboard");
-      }, 50);
+      router.push("/dashboard");
     },
     onError: (error) => {
       setServerError(null);
@@ -49,7 +49,7 @@ export function LoginForm() {
 
       setServerError(error.message || "Invalid email or password");
     },
-  });
+  })
 
   const onSubmit = async (data: LoginFormInput) => {
     setServerError(null);

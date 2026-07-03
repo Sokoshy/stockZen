@@ -1,0 +1,31 @@
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Check,
+  Clock,
+  DollarSign,
+  Download,
+  Edit,
+  FileText,
+  Package,
+  Tag,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react"
+
+export const Icons = {
+  alertTriangle: AlertTriangle,
+  arrowLeft: ArrowLeft,
+  check: Check,
+  clock: Clock,
+  dollarSign: DollarSign,
+  download: Download,
+  edit: Edit,
+  fileText: FileText,
+  package: Package,
+  tag: Tag,
+  trash: Trash2,
+  upload: Upload,
+  x: X,
+}

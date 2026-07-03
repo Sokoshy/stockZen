@@ -1,4 +1,5 @@
 "use client";
+import { useRouter } from "next/navigation";
 
 import { useState } from "react";
 import { useForm } from "react-hook-form";
@@ -29,14 +30,13 @@ export function SignUpForm({ onSuccess }: SignUpFormProps) {
       rememberMe: false,
     },
   });
+  const router = useRouter();
 
   const signUpMutation = api.auth.signUp.useMutation({
     onSuccess: (data) => {
       if (data.success) {
         onSuccess?.();
-        window.setTimeout(() => {
-          window.location.assign("/dashboard");
-        }, 50);
+        router.push("/dashboard")
       }
     },
     onError: (error) => {
