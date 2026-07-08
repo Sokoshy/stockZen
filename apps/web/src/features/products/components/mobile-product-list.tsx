@@ -30,7 +30,7 @@ export function MobileProductList({
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" data-testid="mobile-products-list">
       {products.map((product) => (
         <SwipeableProductCard
           key={product.id}

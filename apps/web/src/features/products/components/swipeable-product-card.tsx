@@ -236,6 +236,7 @@ export function SwipeableProductCard({
               <h3 className="font-semibold text-gray-900">{product.name}</h3>
               <span
                 className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${getSyncBadgeClasses(product.syncStatus)}`}
+                data-testid={`sync-status-${product.id}`}
               >
                 {product.syncStatus}
               </span>
