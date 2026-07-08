@@ -74,7 +74,7 @@ export function SignUpForm({ onSuccess }: SignUpFormProps) {
   };
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+<form onSubmit={handleSubmit(onSubmit)} className="space-y-6" data-testid="signup-form">
       {serverError && (
         <div className="rounded-md bg-red-50 p-4">
           <div className="flex">
@@ -195,9 +195,10 @@ export function SignUpForm({ onSuccess }: SignUpFormProps) {
       </div>
 
       <div>
-        <button
+<button
           type="submit"
           disabled={isSubmitting || signUpMutation.isPending}
+          data-testid="signup-submit"
           className="flex w-full justify-center rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold leading-6 text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {signUpMutation.isPending ? "Creating account..." : "Create account"}

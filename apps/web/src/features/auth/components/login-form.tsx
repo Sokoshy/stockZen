@@ -57,9 +57,9 @@ export function LoginForm() {
   };
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6" noValidate>
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6" noValidate data-testid="login-form">
       {serverError && (
-        <div className="rounded-md bg-red-50 p-4" role="alert" aria-live="polite">
+        <div className="rounded-md bg-red-50 p-4" role="alert" aria-live="polite" data-testid="login-error">
           <p className="text-sm font-medium text-red-800">{serverError}</p>
         </div>
       )}
@@ -115,6 +115,7 @@ export function LoginForm() {
         <button
           type="submit"
           disabled={isSubmitting || loginMutation.isPending}
+          data-testid="login-submit"
           className="flex w-full justify-center rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold leading-6 text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {loginMutation.isPending ? "Signing in..." : "Sign in"}

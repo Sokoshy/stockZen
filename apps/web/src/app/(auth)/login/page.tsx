@@ -17,7 +17,7 @@ export default async function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col justify-center bg-gray-50 px-6 py-12 lg:px-8">
+<div className="flex min-h-screen flex-col justify-center bg-gray-50 px-6 py-12 lg:px-8" data-testid="login-page">
       <div className="sm:mx-auto sm:w-full sm:max-w-sm">
         <h2 className="mt-10 text-center text-2xl font-bold leading-9 tracking-tight text-gray-900">
           Sign in to your account

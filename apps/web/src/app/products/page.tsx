@@ -27,11 +27,11 @@ export default async function ProductsPage() {
   const canImportProducts = membership.role === "Admin" || membership.role === "Manager";
 
   return (
-    <div className="min-h-screen bg-gray-50 px-4 py-8 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-gray-50 px-4 py-8 sm:px-6 lg:px-8" data-testid="products-page">
       <div className="mx-auto max-w-7xl space-y-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-gray-900">Products</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900" data-testid="products-title">Products</h1>
             <p className="mt-1 text-sm text-gray-600">
               Browse and filter products with offline-first capabilities.
             </p>

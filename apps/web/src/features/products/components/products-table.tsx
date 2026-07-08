@@ -61,7 +61,7 @@ export function ProductsTable({
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" data-testid="products-list">
       {!canViewPurchasePrice ? (
         <div className="rounded-md bg-blue-50 p-4" role="status">
           <p className="text-sm font-medium text-blue-900">
@@ -119,7 +119,7 @@ export function ProductsTable({
 
             <tbody className="divide-y divide-gray-100 bg-white">
               {products.map((product) => (
-                <tr key={product.id}>
+<tr key={product.id} data-testid={`product-row-${product.id}`}>
                   <td className="px-3 py-3 text-sm font-medium text-gray-900">{product.name}</td>
                   <td className="px-3 py-3 text-sm text-gray-700">{product.category ?? "-"}</td>
                   <td className="px-3 py-3 text-sm text-gray-700">{product.unit ?? "-"}</td>
@@ -142,6 +142,7 @@ export function ProductsTable({
                   </td>
                   <td className="px-3 py-3 text-sm">
                     <span
+                      data-testid={`sync-status-${product.id}`}
                       className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${getSyncBadgeClasses(product.syncStatus)}`}
                     >
                       {product.syncStatus}
