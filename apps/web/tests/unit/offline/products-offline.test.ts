@@ -121,6 +121,10 @@ vi.mock("~/features/offline/database", () => {
         where: productsWhere,
       },
       outbox: {
+        add: async (op: MockOutboxOperation) => {
+          state.outbox.set(op.id, op);
+          return op.id;
+        },
         delete: async (id: string) => {
           state.outbox.delete(id);
         },

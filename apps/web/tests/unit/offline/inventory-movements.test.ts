@@ -128,7 +128,36 @@ vi.mock("~/features/offline/database", () => {
         },
         where: stockMovementWhere,
       },
-      outbox: {},
+      outbox: {
+        add: async (op: MockOutbox) => {
+          state.outbox.set(op.id, op);
+          return op.id;
+        },
+        get: async (id: string) => state.outbox.get(id),
+        delete: async (id: string) => {
+          state.outbox.delete(id);
+        },
+        toArray: async () => Array.from(state.outbox.values()),
+        update: async (id: string, patch: Partial<MockOutbox>) => {
+          const current = state.outbox.get(id);
+          if (current) {
+            state.outbox.set(id, { ...current, ...patch });
+          }
+        },
+        where: (key: string) => ({
+          equals: (value: unknown) => ({
+            toArray: async () => {
+              if (key === "[tenantId+status]") {
+                const [tenantId, status] = value as [string, string];
+                return Array.from(state.outbox.values()).filter(
+                  (op) => op.payload?.tenantId === tenantId && op.status === status
+                );
+              }
+              return Array.from(state.outbox.values());
+            },
+          }),
+        }),
+      },
     },
   };
 });

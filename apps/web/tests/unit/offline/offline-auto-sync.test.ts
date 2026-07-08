@@ -90,35 +90,87 @@ vi.stubGlobal("window", {
   },
 });
 
-vi.mock("~/features/offline/database", () => ({
-  db: {
-    outbox: {
-      toArray: async () => Array.from(state.outbox.values()),
-      update: async (id: string, patch: Partial<MockOutboxOperation>) => {
-        const existing = state.outbox.get(id);
-        if (existing) {
-          state.outbox.set(id, { ...existing, ...patch });
-        }
+vi.mock("~/features/offline/database", () => {
+  // Helper to fill in tenantId from payload for outbox items that lack it
+  const normalizeOutboxItems = (items: MockOutboxOperation[]) =>
+    items.map((op) => ({
+      ...op,
+      tenantId: (op as Record<string, unknown>).tenantId ?? (op.payload as { tenantId?: string }).tenantId ?? null,
+    }));
+
+  // Helper to filter outbox by a composite [tenantId+status] key
+  const filterOutboxByKey = (key: string, value: unknown) => {
+    if (key === "[tenantId+status]") {
+      const [tenantId, statusPair] = value as [string, string];
+      return normalizeOutboxItems(
+        Array.from(state.outbox.values()).filter(
+          (op) =>
+            (op.payload as { tenantId?: string }).tenantId === tenantId &&
+            op.status === statusPair
+        )
+      );
+    }
+    return normalizeOutboxItems(Array.from(state.outbox.values()));
+  };
+
+  return {
+    db: {
+      outbox: {
+        add: async (op: MockOutboxOperation) => {
+          state.outbox.set(op.id, op);
+          return op.id;
+        },
+        get: async (id: string) => state.outbox.get(id),
+        delete: async (id: string) => {
+          state.outbox.delete(id);
+        },
+        toArray: async () => normalizeOutboxItems(Array.from(state.outbox.values())),
+        update: async (id: string, patch: Partial<MockOutboxOperation>) => {
+          const existing = state.outbox.get(id);
+          if (existing) {
+            state.outbox.set(id, { ...existing, ...patch });
+          }
+        },
+        where: (key: string) => ({
+          equals: (value: unknown) => ({
+            toArray: async () => filterOutboxByKey(key, value),
+            count: async () => filterOutboxByKey(key, value).length,
+          }),
+        }),
+      },
+      stockMovements: {
+        add: async (m: MockStockMovement) => {
+          state.stockMovements.set(m.id, m);
+        },
+        get: async (id: string) => state.stockMovements.get(id),
+        update: async (id: string, patch: Partial<MockStockMovement>) => {
+          const existing = state.stockMovements.get(id);
+          if (existing) {
+            state.stockMovements.set(id, { ...existing, ...patch });
+          }
+        },
+        toArray: async () => Array.from(state.stockMovements.values()),
+      },
+      products: {
+        get: async (id: string) => state.products.get(id),
+        put: async (p: MockProduct) => {
+          state.products.set(p.id, p);
+        },
+        update: async (id: string, patch: Partial<MockProduct>) => {
+          const existing = state.products.get(id);
+          if (existing) {
+            state.products.set(id, { ...existing, ...patch });
+          }
+        },
+        toArray: async () => Array.from(state.products.values()),
+      },
+      transaction: async (...args: unknown[]) => {
+        const callback = args[args.length - 1] as () => Promise<unknown>;
+        return callback();
       },
     },
-    stockMovements: {
-      update: async (id: string, patch: Partial<MockStockMovement>) => {
-        const existing = state.stockMovements.get(id);
-        if (existing) {
-          state.stockMovements.set(id, { ...existing, ...patch });
-        }
-      },
-    },
-    products: {
-      update: async (id: string, patch: Partial<MockProduct>) => {
-        const existing = state.products.get(id);
-        if (existing) {
-          state.products.set(id, { ...existing, ...patch });
-        }
-      },
-    },
-  },
-}));
+  };
+});
 
 vi.mock("~/features/offline/sync-pipeline", async (importOriginal) => {
   const original = await importOriginal<
@@ -477,7 +529,9 @@ describe("E2E - Offline Auto-Sync", () => {
       expect(errorState?.lastError).toBeDefined();
 
       const op = state.outbox.get(operationId);
-      expect(op?.status).toBe("failed");
+      // The operation has retryCount=5 which exceeds DEFAULT_MAX_RETRIES (5),
+      // so markOperationFailed sets the status to "permanently_failed"
+      expect(op?.status).toBe("permanently_failed");
 
       engine.stop();
     });

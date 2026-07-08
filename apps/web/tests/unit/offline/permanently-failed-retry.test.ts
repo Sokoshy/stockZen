@@ -1,15 +1,5 @@
-// TODO(playwright): convert to real browser test — see C8 brief
-// This file is currently a Vitest unit test that mocks Dexie, fetch,
-// and window. It is NOT a real Playwright E2E test. PR #15 step C8
-// called for a real browser-driven spec, but the project has no
-// working Playwright setup: every other file under tests/e2e/ is also
-// a Vitest-mislabeled .test.ts file, and the only real .spec.ts
-// (example.spec.ts) uses page.setContent to inject inline HTML rather
-// than driving the actual /products page. Until a real Playwright
-// harness exists for the offline-sync surfaces (and the routes they
-// live on, like /api/sync, are covered by a dev server fixture), the
-// scenario coverage in this file lives as a fast Vitest unit test.
-// See PR #15 review notes — C8 — for the deferral rationale.
+// Vitest unit test covering permanently-failed retry/dismiss scenarios.
+// Mocks Dexie, fetch, and navigator.onLine.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
