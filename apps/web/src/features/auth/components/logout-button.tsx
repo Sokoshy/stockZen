@@ -1,13 +1,13 @@
-"use client"
-import { useRouter } from "next/navigation"
+"use client";
+import { useRouter } from "next/navigation";
 
 import { api } from "~/trpc/react";
 
 export function LogoutButton() {
-  const router = useRouter()
+  const router = useRouter();
   const logoutMutation = api.auth.logout.useMutation({
     onSuccess: () => {
-      router.push("/login")
+      router.push("/login");
     },
   })
 
